@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Sync the upstream-owned method files into this project.
+#
+# Only files this project never hand-edits are touched. Your profiles, your
+# planning documents, and your working agreement are never overwritten -- that
+# separation is the whole reason the sync can be a plain overwrite instead of a
+# merge, since a template repo shares no git history with the projects made
+# from it.
+#
+# Fetches through `gh api`, which uses your existing GitHub auth and therefore
+# works whether the upstream repo is private or public. Falls back to anonymous
+# curl only when gh is unavailable AND the repo is public -- raw.githubusercontent
+# returns 404 for private repos, which is why gh is the primary path.
+#
+# Usage:  bin/scaffold-update            # show what changed, then ask
+#         bin/scaffold-update --check    # report only, change nothing
+#         SCAFFOLD_UPSTREAM=owner/repo bin/scaffold-update
+set -euo pipefail
+
+UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding}"
+BRANCH="${SCAFFOLD_BRANCH:-main}"
+
+# Upstream-owned. Anything added here must be a file no project edits.
+SYNCED=(
+  VERSION
+  PROJECT-INSTRUCTIONS.md
+  CLOSEOUT-RITUAL.md
+  bin/scaffold-update
+  docs/specs/component-spec-TEMPLATE.md
+  docs/decisions/adr-TEMPLATE.md
+  docs/session-logs/session-log-000-TEMPLATE.md
+)
+
+CHECK_ONLY=false
+[ "${1:-}" = "--check" ] && CHECK_ONLY=true
+
+[ -f VERSION ] || { echo "run this from the project root"; exit 1; }
+
+if command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+  MODE=gh
+elif command -v curl >/dev/null; then
+  MODE=curl
+  echo "note: gh unavailable, falling back to anonymous fetch (public repos only)"
+else
+  echo "need either gh (authenticated) or curl"; exit 1
+fi
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+flat() { echo "$1" | tr / _; }
+
+fetch() {
+  local path="$1" out="${TMP}/$(flat "$1")"
+  if [ "$MODE" = gh ]; then
+    gh api "repos/${UPSTREAM}/contents/${path}?ref=${BRANCH}" \
+      -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null
+  else
+    curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM}/${BRANCH}/${path}" \
+      -o "$out" 2>/dev/null
+  fi
+}
+
+echo "upstream: ${UPSTREAM}@${BRANCH} (via ${MODE})"
+if fetch VERSION; then
+  echo "local  version: $(cat VERSION)"
+  echo "remote version: $(cat "${TMP}/VERSION")"
+else
+  echo "could not reach upstream"
+  echo "  - private repo? gh must be authenticated: gh auth status"
+  echo "  - wrong name? current setting is ${UPSTREAM}"
+  exit 1
+fi
+
+CHANGED=()
+for f in "${SYNCED[@]}"; do
+  if ! fetch "$f"; then
+    echo "  ?  ${f} -- not present upstream, skipped"
+    continue
+  fi
+  t="${TMP}/$(flat "$f")"
+  if [ ! -f "$f" ]; then
+    echo "  +  ${f} -- new upstream"
+    CHANGED+=("$f")
+  elif ! cmp -s "$f" "$t"; then
+    echo "  M  ${f}"
+    CHANGED+=("$f")
+  fi
+done
+
+if [ ${#CHANGED[@]} -eq 0 ]; then
+  echo "up to date."
+  exit 0
+fi
+
+if $CHECK_ONLY; then
+  echo
+  echo "${#CHANGED[@]} file(s) behind upstream. Run without --check to see diffs."
+  exit 0
+fi
+
+echo
+for f in "${CHANGED[@]}"; do
+  echo "=== ${f} ==="
+  diff -u "$f" "${TMP}/$(flat "$f")" 2>/dev/null || true
+  echo
+done
+
+printf 'apply all %d change(s)? [y/N] ' "${#CHANGED[@]}"
+read -r reply
+case "$reply" in
+  y|Y)
+    for f in "${CHANGED[@]}"; do
+      mkdir -p "$(dirname "$f")"
+      cp "${TMP}/$(flat "$f")" "$f"
+      echo "updated ${f}"
+    done
+    chmod +x bin/scaffold-update
+    echo
+    echo "Done. Re-paste PROJECT-INSTRUCTIONS.md into the Instructions field --"
+    echo "the file on disk is not what the AI project loaded."
+    ;;
+  *) echo "nothing changed." ;;
+esac
