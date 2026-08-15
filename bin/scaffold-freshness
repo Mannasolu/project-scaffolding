@@ -27,28 +27,36 @@ set -euo pipefail
 OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding-private}"
 BRANCH="${SCAFFOLD_BRANCH:-main}"
 
+# grep exits 1 on no-match, which set -e would treat as a hard failure in a
+# plain assignment. Always route through this so "no stamp" is data, not a
+# crash.
 stamp_of() {
-  grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" 2>/dev/null | awk '{print $2}'
+  grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" 2>/dev/null | awk '{print $2}' || true
 }
 
 echo "== OPERATOR-PROFILE.md vs. ${OPERATOR_UPSTREAM} =="
-if [ ! -f OPERATOR-PROFILE.md ]; then
+if [ -d export ]; then
+  echo "  this repo is the upstream (export/ present) -- nothing to compare against"
+elif [ ! -f OPERATOR-PROFILE.md ]; then
   echo "  not present"
-elif local_stamp="$(stamp_of OPERATOR-PROFILE.md)" && [ -z "$local_stamp" ]; then
-  echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
-elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  remote_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
-    --jq '.[0].sha[0:7]' 2>/dev/null || true)"
-  if [ -z "$remote_sha" ]; then
-    echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
-  elif [ "$local_stamp" = "$remote_sha" ]; then
-    echo "  up to date (${local_stamp})"
-  else
-    echo "  STALE -- local copy stamped ${local_stamp}, upstream OPERATOR-PROFILE.md is now ${remote_sha}."
-    echo "  Re-copy OPERATOR-PROFILE.md by hand from the upstream repo; this file is never auto-synced."
-  fi
 else
-  echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+  local_stamp="$(stamp_of OPERATOR-PROFILE.md)"
+  if [ -z "$local_stamp" ]; then
+    echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+  elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    remote_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
+      --jq '.[0].sha[0:7]' 2>/dev/null || true)"
+    if [ -z "$remote_sha" ]; then
+      echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
+    elif [ "$local_stamp" = "$remote_sha" ]; then
+      echo "  up to date (${local_stamp})"
+    else
+      echo "  STALE -- local copy stamped ${local_stamp}, upstream OPERATOR-PROFILE.md is now ${remote_sha}."
+      echo "  Re-copy OPERATOR-PROFILE.md by hand from the upstream repo; this file is never auto-synced."
+    fi
+  else
+    echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+  fi
 fi
 
 echo
