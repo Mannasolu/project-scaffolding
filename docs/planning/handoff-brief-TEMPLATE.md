@@ -4,6 +4,7 @@
 > full context. Overwritten, never accumulated.
 
 **Last updated:** [YYYY-MM-DD] (revised after session [NNN] closeout)
+**Stamped:** [short-sha] ([YYYY-MM-DD]) -- see `bin/scaffold-freshness`
 **Next up:** [The single next action, stated concretely enough to start cold.]
 
 ## Who / What
@@ -24,7 +25,8 @@ output.]
 
 ## Credentials / repos
 
-- Org: `[org name]`
+- Account: `[account or org]` -- state plainly whether this is a personal
+  account or an organization. The two differ in what's even possible.
 - `[repo URL or path]` -- [what it is, visibility, any relevant flags].
 - Local: `[local paths]`
 - [Key or credential registration details -- name only, never the key itself.]

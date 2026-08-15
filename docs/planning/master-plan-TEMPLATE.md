@@ -2,7 +2,8 @@
 
 > **What this document is:** the "what and why." Scope, model, phases, open
 > questions. When the definition of the project changes, you REWRITE this as v2,
-> v3 -- you don't patch it. Delete these prompt lines as you fill each section.
+> v3 -- you don't patch it, and you don't rename the file. Delete these prompt
+> lines as you fill each section.
 
 ## 1. Scope
 > One paragraph: what is being built, and what is explicitly NOT in scope.

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Check whether the hand-copied documents in this project are stale.
+#
+# Two of the three unverified hops diagnosed in scaffolding session logs
+# 007-008 have no built-in staleness signal: OPERATOR-PROFILE.md, copied by
+# hand from the upstream operator, and docs/planning/handoff-brief.md, which
+# goes stale the moment this repo's own decision record moves past it -- even
+# though nothing "copied" it from anywhere. A brief that sends a session to
+# verify a question ADR-005 already closed is the same defect as a knowledge
+# base serving a two-session-stale brief: a claim nobody re-checked against
+# the thing that actually changed. This script makes both checkable by grep
+# instead of by inference. (The third hop, the AI project's Instructions
+# field, has no API and isn't checkable from here.)
+#
+# Stamp format, one line near the top of each file:
+#   **Stamped:** <short-sha> (<date>)
+#
+# For OPERATOR-PROFILE.md, the stamp is the commit that last touched
+# OPERATOR-PROFILE.md in the upstream (operator) repo, at the time this copy
+# was made. For handoff-brief.md, the stamp is this repo's own HEAD at the
+# time the brief was last written -- checked against the newest commit that
+# touched docs/decisions/ or WORKING-AGREEMENT.md since.
+#
+# Usage: bin/scaffold-freshness
+set -euo pipefail
+
+OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding-private}"
+BRANCH="${SCAFFOLD_BRANCH:-main}"
+
+stamp_of() {
+  grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" 2>/dev/null | awk '{print $2}'
+}
+
+echo "== OPERATOR-PROFILE.md vs. ${OPERATOR_UPSTREAM} =="
+if [ ! -f OPERATOR-PROFILE.md ]; then
+  echo "  not present"
+elif local_stamp="$(stamp_of OPERATOR-PROFILE.md)" && [ -z "$local_stamp" ]; then
+  echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  remote_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
+    --jq '.[0].sha[0:7]' 2>/dev/null || true)"
+  if [ -z "$remote_sha" ]; then
+    echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
+  elif [ "$local_stamp" = "$remote_sha" ]; then
+    echo "  up to date (${local_stamp})"
+  else
+    echo "  STALE -- local copy stamped ${local_stamp}, upstream OPERATOR-PROFILE.md is now ${remote_sha}."
+    echo "  Re-copy OPERATOR-PROFILE.md by hand from the upstream repo; this file is never auto-synced."
+  fi
+else
+  echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+fi
+
+echo
+echo "== docs/planning/handoff-brief.md vs. this repo's own decisions =="
+if [ ! -f docs/planning/handoff-brief.md ]; then
+  echo "  not present"
+elif ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "  not a git repo -- cannot verify freshness"
+else
+  brief_stamp="$(stamp_of docs/planning/handoff-brief.md)"
+  newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md 2>/dev/null || true)"
+  if [ -z "$brief_stamp" ]; then
+    echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+  elif [ -z "$newest_decision" ]; then
+    echo "  no decisions tracked yet"
+  elif [ "$brief_stamp" = "$newest_decision" ] || git merge-base --is-ancestor "$newest_decision" "$brief_stamp" 2>/dev/null; then
+    echo "  up to date (${brief_stamp})"
+  else
+    echo "  STALE -- brief stamped ${brief_stamp}, but docs/decisions/ or WORKING-AGREEMENT.md"
+    echo "  changed since (newest: ${newest_decision}). Rewrite the brief before trusting it."
+  fi
+fi

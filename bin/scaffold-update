@@ -25,7 +25,9 @@ SYNCED=(
   VERSION
   PROJECT-INSTRUCTIONS.md
   CLOSEOUT-RITUAL.md
+  SECURITY-POSTURE.md
   bin/scaffold-update
+  bin/scaffold-freshness
   docs/specs/component-spec-TEMPLATE.md
   docs/decisions/adr-TEMPLATE.md
   docs/session-logs/session-log-000-TEMPLATE.md
@@ -112,10 +114,14 @@ case "$reply" in
   y|Y)
     for f in "${CHANGED[@]}"; do
       mkdir -p "$(dirname "$f")"
-      cp "${TMP}/$(flat "$f")" "$f"
+      # mv, not cp: this loop can overwrite bin/scaffold-update while bash is
+      # still reading it. A same-inode overwrite (cp) corrupts that read
+      # mid-script; an atomic rename onto a new inode does not.
+      cp "${TMP}/$(flat "$f")" "${f}.new"
+      mv "${f}.new" "$f"
       echo "updated ${f}"
     done
-    chmod +x bin/scaffold-update
+    chmod +x bin/scaffold-update bin/scaffold-freshness 2>/dev/null || true
     echo
     echo "Done. Re-paste PROJECT-INSTRUCTIONS.md into the Instructions field --"
     echo "the file on disk is not what the AI project loaded."

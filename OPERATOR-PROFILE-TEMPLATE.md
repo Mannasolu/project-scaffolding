@@ -53,7 +53,10 @@ offering options and commit to one; no apology, no recap.]
 - [Machine name -- role, OS, hostname, username, what's installed, how you
   authenticate to relevant services.]
 - [Any secondary machines -- role, username, address.]
-- [Org or account names relevant across projects.]
+- [Org or account names relevant across projects. State plainly whether each is
+  a personal account or an organization -- the two differ in what features and
+  what grants are even possible, and assuming the wrong one costs a design
+  pass.]
 
 [Anything about your environment that has already cost time once and is worth
 flagging early -- naming inconsistencies, spelling variants, username
