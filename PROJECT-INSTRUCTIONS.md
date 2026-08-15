@@ -144,3 +144,12 @@ Four things produced: updated handoff brief, session log additions,
 working-agreement entries (promoted into this file when they recur or are
 clearly general), and a one-line summary. Then commit, and state the single next
 step so the next session opens with no guessing.
+
+**Required last step, not an open item: re-paste the Instructions field.**
+Output the current, post-commit text of all three files -- this one,
+OPERATOR-PROFILE.md, PROJECT-PROFILE.md -- in full, and state plainly that
+the session is not closed until they're pasted. No tool can do this step;
+it has been skipped across multiple sessions precisely because it felt
+optional when logged as a carryover instead of demanded as the last thing
+the ritual asks for. `bin/scaffold-freshness` cannot see this hop (ADR-007) --
+this step is the only mitigation that exists for it.

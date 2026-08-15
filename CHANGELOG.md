@@ -6,6 +6,19 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.2.0
+
+- `CLOSEOUT-RITUAL.md`: re-pasting the Instructions field is now a **required
+  last step**, not an open item -- output the current text of all three
+  pasted files and state plainly the session isn't closed until they're
+  pasted. *Cost: identified and skipped across multiple consecutive
+  sessions, because logging it as a carryover made it feel optional. It is
+  the one step no tool can perform; demoting it to a list item is how it
+  kept not happening.*
+- `PROJECT-INSTRUCTIONS.md`: closeout summary now states the same rule, so
+  it loads every session without requiring a read of `CLOSEOUT-RITUAL.md`
+  itself.
+
 ## 1.1.0
 
 - `SECURITY-POSTURE.md` added: what a public export may and may not carry, the

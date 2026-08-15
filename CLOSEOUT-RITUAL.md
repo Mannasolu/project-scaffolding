@@ -80,6 +80,9 @@ several specific corrections usually collapse into one general principle.
 5. Save and commit to the repo with a git message that names the session.
 6. Before ending, state the single next step, so the next session opens with no
    guessing.
+7. **Last: re-paste the Instructions field.** Required, not an open item --
+   see below. This is deliberately the final step in this list so it cannot
+   be buried under whatever comes after it.
 
 ## The commit pattern
 
@@ -88,3 +91,31 @@ git add docs/ *.md
 git commit -m "session NNN: short description"
 git push
 ```
+
+## The required last step: re-paste the Instructions field
+
+**This is not an open item, and it does not get logged for later.** It has
+already been identified and skipped across multiple consecutive sessions --
+not because it's hard, but because it always sat last in a list of
+carryovers that felt optional. It isn't optional. It is the last thing this
+ritual asks for, on purpose, so nothing that follows it in a session can
+bury it again.
+
+**No tool performs this step.** `PROJECT-INSTRUCTIONS.md`, `OPERATOR-PROFILE.md`,
+and `PROJECT-PROFILE.md` live in git; the AI project's Instructions field has
+no API. Nothing on Karakana, or anywhere else, can read or write it. The only
+transport is a human pasting. `bin/scaffold-freshness` checks the other two
+hand-moved documents in this practice -- it cannot check this one; see
+ADR-007's "Known limit."
+
+So the assistant's part of this step is not "do it." It is:
+
+1. **Output the current, post-commit text of all three files** --
+   `PROJECT-INSTRUCTIONS.md`, `OPERATOR-PROFILE.md`, `PROJECT-PROFILE.md` --
+   in full, ready to paste, at every closeout. Not a diff, not a summary of
+   what changed in them -- the complete text, every time, because a partial
+   paste is a new way to get this wrong.
+2. **State plainly: the session is not closed until these are pasted.** Not
+   "when convenient." Not carried forward as an open item -- naming it as an
+   open item is exactly how it has been skipped before. It is named as the
+   literal last thing standing between this session and done.
