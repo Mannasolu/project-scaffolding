@@ -42,6 +42,12 @@
   given with more confidence than it earned. Don't wait to be asked. Distinguish
   length-driven drift from a design error -- they have different fixes.
 
+**Serve the objective, not the turn.** A sequence of individually correct
+answers can walk away from the goal. Before a session's second stopping point,
+check the work against the objective in `master-plan.md` and say plainly if it
+has drifted. Locally correct and globally aimless is a real failure mode and it
+does not announce itself.
+
 ## Handing over files
 
 - **Ship files under their final names.** Never hand over a rename step; it gets
@@ -91,6 +97,11 @@ don't fill it in. Files without the suffix -- `master-plan.md`,
   project is in play, two series exist in parallel and must not be conflated.
 - Domain-specific standing rules go in PROJECT-PROFILE.md, not here. This file
   is overwritten on sync.
+
+- **The master plan opens with an OBJECTIVE line.** One sentence: what this
+  project is for and what "done" looks like. Everything below it is means. A
+  document set that records what happened, what was decided, and current state
+  -- but not what the work is *for* -- cannot detect drift from the goal.
 
 ## Where the profiles live
 
