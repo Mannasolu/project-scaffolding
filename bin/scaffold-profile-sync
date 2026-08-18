@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Copy OPERATOR-PROFILE.md from this upstream repo into a target project,
+# stamping it with the upstream commit of that file in the same pass.
+# Usage: bin/scaffold-profile-sync <target-project-dir>
+set -euo pipefail
+
+UPSTREAM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$UPSTREAM_DIR/OPERATOR-PROFILE.md"
+TARGET="${1:-}"
+
+[ -n "$TARGET" ] || { echo "usage: $(basename "$0") <target-project-dir>" >&2; exit 2; }
+[ -f "$SRC" ] || { echo "no OPERATOR-PROFILE.md in $UPSTREAM_DIR" >&2; exit 1; }
+[ -d "$TARGET" ] || { echo "not a directory: $TARGET" >&2; exit 1; }
+[ "$(cd "$TARGET" && pwd)" != "$UPSTREAM_DIR" ] || { echo "refusing to stamp the upstream copy" >&2; exit 1; }
+
+git -C "$UPSTREAM_DIR" diff --quiet -- OPERATOR-PROFILE.md || {
+  echo "OPERATOR-PROFILE.md has uncommitted changes -- commit first, or the stamp lies" >&2; exit 1; }
+
+SHA="$(git -C "$UPSTREAM_DIR" log -1 --format=%h -- OPERATOR-PROFILE.md)"
+DATE="$(git -C "$UPSTREAM_DIR" log -1 --format=%ad --date=short -- OPERATOR-PROFILE.md)"
+ORIGIN="$(basename -s .git "$(git -C "$UPSTREAM_DIR" remote get-url origin 2>/dev/null || echo upstream)")"
+STAMP="**Stamped:** $SHA ($DATE) -- copied from $ORIGIN; see bin/scaffold-freshness"
+
+awk -v stamp="$STAMP" '
+  /^\*\*Stamped:\*\*/ { next }
+  { print }
+  /^\*\*Last updated:\*\*/ && !done { print stamp; done=1 }
+' "$SRC" > "$TARGET/OPERATOR-PROFILE.md"
+
+echo "stamped $SHA ($DATE) -> $TARGET/OPERATOR-PROFILE.md"
