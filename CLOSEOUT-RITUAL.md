@@ -108,7 +108,7 @@ bury it again.
 
 **No tool performs this step.** `PROJECT-INSTRUCTIONS.md`, `OPERATOR-PROFILE.md`,
 and `PROJECT-PROFILE.md` live in git; the AI project's Instructions field has
-no API. Nothing on Karakana, or anywhere else, can read or write it. The only
+no API. Nothing on any machine you own can read or write it. The only
 transport is a human pasting. `bin/scaffold-freshness` checks the other two
 hand-moved documents in this practice -- it cannot check this one; see
 ADR-007's "Known limit."

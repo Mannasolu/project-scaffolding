@@ -24,7 +24,7 @@
 # Usage: bin/scaffold-freshness
 set -euo pipefail
 
-OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding-private}"
+OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding}"
 BRANCH="${SCAFFOLD_BRANCH:-main}"
 
 # grep exits 1 on no-match, which set -e would treat as a hard failure in a
