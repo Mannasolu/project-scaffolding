@@ -21,16 +21,39 @@ the deliverable. Check the whole tree the export ships in, not just what that
 step touched -- a leak in a pre-existing file outside the edit list is still a
 leak (scaffolding session log 005).
 
+**This check is not advisory, and it does not run after the fact.** Anything
+that generates an export scans the *complete generated tree* against the
+identifier list above before writing a single file to the target, and aborts
+on any hit. Scanning afterward, or trusting the generator's own rewrites to
+have covered everything, both fail the same way: the leak is already in the
+tree a human is about to commit. `bin/scaffold-export` implements this as a
+hard abort.
+
 ## The export rewrites, it does not copy
 
-`bin/scaffold-update`'s `UPSTREAM` line defaults to wherever the file's own
-repo should pull updates from. A public export's copy of `bin/scaffold-update`
-must default to the *public* repo, not the private one it was generated from.
-Copying the private root's file verbatim into an export does two things wrong
-at once: it leaks the private repo's name, and it hands a stranger a script
-pointed at a repo they cannot read. Anything that generates an export
-rewrites this line; it never copies it. (Diagnosed scaffolding session log
-007; `bin/scaffold-export` implements the rewrite.)
+Some lines must be *rewritten* to stay correct downstream. Scrubbing is not
+only removal.
+
+The rule is about a class of line, not a known instance of one. Any
+`UPSTREAM`-shaped default -- any variable naming the repo its own file should
+pull from -- must point at the public repo in a public export. The private
+root's value is correct there and wrong the moment it ships.
+
+**Scope the rewrite to the pattern, never to a file.** The set of files an
+export carries is open-ended and grows; a rewrite anchored to one path and one
+variable name is correct exactly until the next script arrives carrying its
+own upstream default. That is not hypothetical: the rewrite was written for
+`bin/scaffold-update` alone, `bin/scaffold-freshness` was later added to the
+export carrying `OPERATOR_UPSTREAM`, and the private repo's name shipped
+publicly until a tree-wide grep caught it. The defect was the narrow scope,
+not the missed file.
+
+Copying such a line verbatim does two things wrong at once: it leaks the
+private repo's name, and it hands a stranger a script pointed at a repo they
+cannot read. (Diagnosed scaffolding session log 007; scope corrected after the
+leak it missed. `bin/scaffold-export` implements the rewrite across every
+staged file, with the tree-wide guard above as the backstop for whatever the
+pattern doesn't reach.)
 
 ## No org-scoped GitHub features
 
