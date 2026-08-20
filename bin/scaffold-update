@@ -33,6 +33,51 @@ SYNCED=(
   docs/session-logs/session-log-000-TEMPLATE.md
 )
 
+# Formerly upstream-owned files upstream has since dropped. A plain fetch
+# failure can't tell "upstream deleted this on purpose" apart from "the
+# network hiccuped" -- so retirement is a deliberate, reviewed list here,
+# same discipline as SYNCED above, instead of inferred from a 404. A name
+# only ever lands here because someone put it there on purpose; nothing
+# about running this script adds to it.
+RETIRED=(
+  STARTUP-RITUAL.md
+)
+
+# Files no downstream project may ever have touched by this script, synced
+# or retired: operator- and project-owned governance (ADR-004's partition),
+# this repo's own planning/decision/log history, and (in the upstream repo
+# itself) its private export tooling. Checked against SYNCED and RETIRED at
+# every run, not just trusted at authoring time -- a bad edit to either
+# array above must fail loudly here rather than silently deleting or
+# overwriting something it was never allowed to touch.
+is_protected() {
+  case "$1" in
+    WORKING-AGREEMENT.md|OPERATOR-PROFILE.md|PROJECT-PROFILE.md) return 0 ;;
+    docs/planning/*) return 0 ;;
+    docs/session-logs/*) [[ "$1" == *-TEMPLATE.md ]] && return 1 || return 0 ;;
+    docs/decisions/*) [[ "$1" == *-TEMPLATE.md ]] && return 1 || return 0 ;;
+    export/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+for f in "${SYNCED[@]}" "${RETIRED[@]}"; do
+  if is_protected "$f"; then
+    echo "refusing to run: '${f}' is in SYNCED or RETIRED but matches a" >&2
+    echo "protected operator/project-owned pattern (ADR-004). Fix the array" >&2
+    echo "in bin/scaffold-update before running again." >&2
+    exit 1
+  fi
+done
+for r in "${RETIRED[@]}"; do
+  for s in "${SYNCED[@]}"; do
+    if [ "$r" = "$s" ]; then
+      echo "refusing to run: '${r}' is in both SYNCED and RETIRED." >&2
+      exit 1
+    fi
+  done
+done
+
 CHECK_ONLY=false
 [ "${1:-}" = "--check" ] && CHECK_ONLY=true
 
@@ -90,14 +135,24 @@ for f in "${SYNCED[@]}"; do
   fi
 done
 
-if [ ${#CHANGED[@]} -eq 0 ]; then
+TO_DELETE=()
+for f in "${RETIRED[@]}"; do
+  if [ -f "$f" ]; then
+    echo "  D  ${f} -- retired upstream, will be deleted"
+    TO_DELETE+=("$f")
+  fi
+done
+
+TOTAL=$(( ${#CHANGED[@]} + ${#TO_DELETE[@]} ))
+
+if [ "$TOTAL" -eq 0 ]; then
   echo "up to date."
   exit 0
 fi
 
 if $CHECK_ONLY; then
   echo
-  echo "${#CHANGED[@]} file(s) behind upstream. Run without --check to see diffs."
+  echo "${TOTAL} file(s) behind upstream. Run without --check to see diffs."
   exit 0
 fi
 
@@ -107,8 +162,13 @@ for f in "${CHANGED[@]}"; do
   diff -u "$f" "${TMP}/$(flat "$f")" 2>/dev/null || true
   echo
 done
+for f in "${TO_DELETE[@]}"; do
+  echo "=== ${f} ==="
+  echo "-- retired upstream; will be deleted --"
+  echo
+done
 
-printf 'apply all %d change(s)? [y/N] ' "${#CHANGED[@]}"
+printf 'apply all %d change(s)? [y/N] ' "$TOTAL"
 read -r reply
 case "$reply" in
   y|Y)
@@ -120,6 +180,10 @@ case "$reply" in
       cp "${TMP}/$(flat "$f")" "${f}.new"
       mv "${f}.new" "$f"
       echo "updated ${f}"
+    done
+    for f in "${TO_DELETE[@]}"; do
+      rm -f "$f"
+      echo "removed ${f}"
     done
     chmod +x bin/scaffold-update bin/scaffold-freshness 2>/dev/null || true
     echo

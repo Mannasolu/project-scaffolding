@@ -21,11 +21,33 @@
 # time the brief was last written -- checked against the newest commit that
 # touched docs/decisions/ or WORKING-AGREEMENT.md since.
 #
+# Exit codes, so something can gate on this instead of scraping the text:
+#   0  fresh   -- every check that could run found its copy up to date
+#   1  stale   -- at least one copy is confirmed behind its source
+#   2  unknown -- at least one check could not run (no stamp, unreachable
+#                 upstream, gh unavailable, not a git repo) and none of the
+#                 checks that did run found staleness
+#
+# ADR-007's known limit still applies to all three codes: this script cannot
+# see the Instructions field on claude.ai -- no API reads or writes it. A
+# fresh (0) exit means the two on-disk copies this script can check are
+# current; it says nothing about whether the AI project has loaded them, and
+# must never be read, worded, or gated on as if it did. That hop's only
+# mitigation is the closeout ritual's required re-paste step.
+#
 # Usage: bin/scaffold-freshness
 set -euo pipefail
 
 OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding}"
 BRANCH="${SCAFFOLD_BRANCH:-main}"
+
+EXIT_FRESH=0
+EXIT_STALE=1
+EXIT_UNKNOWN=2
+STATUS=$EXIT_FRESH
+
+mark_stale() { STATUS=$EXIT_STALE; }
+mark_unknown() { [ "$STATUS" -eq $EXIT_STALE ] || STATUS=$EXIT_UNKNOWN; }
 
 # grep exits 1 on no-match, which set -e would treat as a hard failure in a
 # plain assignment. Always route through this so "no stamp" is data, not a
@@ -39,23 +61,28 @@ if [ -d export ]; then
   echo "  this repo is the upstream (export/ present) -- nothing to compare against"
 elif [ ! -f OPERATOR-PROFILE.md ]; then
   echo "  not present"
+  mark_unknown
 else
   local_stamp="$(stamp_of OPERATOR-PROFILE.md)"
   if [ -z "$local_stamp" ]; then
     echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+    mark_unknown
   elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     remote_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
       --jq '.[0].sha[0:7]' 2>/dev/null || true)"
     if [ -z "$remote_sha" ]; then
       echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
+      mark_unknown
     elif [ "$local_stamp" = "$remote_sha" ]; then
       echo "  up to date (${local_stamp})"
     else
       echo "  STALE -- local copy stamped ${local_stamp}, upstream OPERATOR-PROFILE.md is now ${remote_sha}."
       echo "  Re-copy OPERATOR-PROFILE.md by hand from the upstream repo; this file is never auto-synced."
+      mark_stale
     fi
   else
     echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+    mark_unknown
   fi
 fi
 
@@ -63,13 +90,16 @@ echo
 echo "== docs/planning/handoff-brief.md vs. this repo's own decisions =="
 if [ ! -f docs/planning/handoff-brief.md ]; then
   echo "  not present"
+  mark_unknown
 elif ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "  not a git repo -- cannot verify freshness"
+  mark_unknown
 else
   brief_stamp="$(stamp_of docs/planning/handoff-brief.md)"
   newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md 2>/dev/null || true)"
   if [ -z "$brief_stamp" ]; then
     echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+    mark_unknown
   elif [ -z "$newest_decision" ]; then
     echo "  no decisions tracked yet"
   elif [ "$brief_stamp" = "$newest_decision" ] || git merge-base --is-ancestor "$newest_decision" "$brief_stamp" 2>/dev/null; then
@@ -77,5 +107,24 @@ else
   else
     echo "  STALE -- brief stamped ${brief_stamp}, but docs/decisions/ or WORKING-AGREEMENT.md"
     echo "  changed since (newest: ${newest_decision}). Rewrite the brief before trusting it."
+    mark_stale
   fi
 fi
+
+echo
+case "$STATUS" in
+  "$EXIT_FRESH")
+    echo "fresh -- every check above that could run found its copy up to date."
+    echo "This says nothing about the Instructions field on claude.ai; no tool"
+    echo "here can check that hop (ADR-007)."
+    ;;
+  "$EXIT_STALE")
+    echo "stale -- at least one copy above is confirmed behind its source."
+    ;;
+  "$EXIT_UNKNOWN")
+    echo "unknown -- at least one check above could not run (see \"cannot verify\""
+    echo "or \"could not reach\" lines). Nothing confirmed stale, but freshness"
+    echo "isn't confirmed either."
+    ;;
+esac
+exit "$STATUS"
