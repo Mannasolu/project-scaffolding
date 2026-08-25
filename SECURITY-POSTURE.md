@@ -55,6 +55,34 @@ leak it missed. `bin/scaffold-export` implements the rewrite across every
 staged file, with the tree-wide guard above as the backstop for whatever the
 pattern doesn't reach.)
 
+## A secret never enters the chat transcript
+
+A credential, key, token, or password must never appear in this
+conversation -- not pasted, not printed by a command's output, not included
+in a diagnostic dump. The rule is about the class, not the one key that
+happened to produce it: any secret, and any command whose output would place
+one here.
+
+**The handling that replaces it:** a secret moves terminal-to-file --
+written directly into the `.env`-shaped file it belongs in, never through a
+chat message -- or terminal-to-terminal, read and acted on on the machine
+that holds it, with only the fact of the action reported back, not the
+value. Construct the command so the secret is never echoed: redirect to a
+file instead of printing to standard out, pass it by flag-from-file or
+prompt rather than as a bare argument, and check what a command will print
+before running it if there is any doubt.
+
+**Known failure: `read -rs` does not suppress the echo when there is no
+TTY.** Suppression is a terminal feature, not a shell one -- a command run
+through an agent, a pipe, or any other non-interactive path can lack a
+controlling terminal, and `read -rs` silently does nothing in that case. A
+command written to be safe on an interactive terminal is not safe by the
+same reasoning run through anything else.
+
+This rule was written once, lived only in a since-retired planning document,
+and was lost with it when the document was deleted. Restated here as its
+durable home. (scaffolding session log 014)
+
 ## No org-scoped GitHub features
 
 Nothing in this scaffolding, or in a project built from it, may assume the

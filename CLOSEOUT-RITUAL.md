@@ -32,10 +32,12 @@ should offer it proactively in the second case -- not wait to be asked.
    step that stops the same correction being rediscovered every few sessions.
 4. **A one-line summary** of what changed and what's still open.
 
-   Before writing the session log, read the OBJECTIVE line in `master-plan.md`
-   and ask whether this session served it. If it did not, the log says so in
-   one sentence. A session spent on the scaffolding rather than the subject is
-   legitimate; a run of them unnoticed is not.
+   Before writing the session log, read the OBJECTIVE line wherever it lives
+   -- `master-plan.md` by default, or `PROJECT-PROFILE.md` if the project
+   carries no master plan by design -- and ask whether this session served
+   it. If it did not, the log says so in one sentence. A session spent on the
+   scaffolding rather than the subject is legitimate; a run of them unnoticed
+   is not.
 
 ## The fifth thing: upstream candidates
 

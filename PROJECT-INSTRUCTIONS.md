@@ -44,9 +44,10 @@
 
 **Serve the objective, not the turn.** A sequence of individually correct
 answers can walk away from the goal. Before a session's second stopping point,
-check the work against the objective in `master-plan.md` and say plainly if it
-has drifted. Locally correct and globally aimless is a real failure mode and it
-does not announce itself.
+read the OBJECTIVE line wherever it lives -- `master-plan.md` by default, or
+`PROJECT-PROFILE.md` if the project carries no master plan by design -- check
+the work against it, and say plainly if it has drifted. Locally correct and
+globally aimless is a real failure mode and it does not announce itself.
 
 ## Handing over files
 
@@ -93,15 +94,24 @@ don't fill it in. Files without the suffix -- `master-plan.md`,
 - Flag when a decision contradicts something already written down
 - Distinguish what's settled from what's still open; keep an explicit
   open-questions list
-- Session logs are numbered **within a repo**, not globally. If more than one
-  project is in play, two series exist in parallel and must not be conflated.
+- **Any identifier that is unique only within a repo is meaningless without
+  its repo attached.** Session logs and ADRs are both numbered **within a
+  repo**, not globally. If more than one project is in play, each has its own
+  series, and a citation to either must carry its repo -- e.g. "project-a
+  session 006" or "project-b ADR-002", never a bare number. A bare number
+  resolves silently against whichever repo the reader is currently standing
+  in and can return a real, wrong answer instead of failing loudly.
 - Domain-specific standing rules go in PROJECT-PROFILE.md, not here. This file
   is overwritten on sync.
 
-- **The master plan opens with an OBJECTIVE line.** One sentence: what this
-  project is for and what "done" looks like. Everything below it is means. A
-  document set that records what happened, what was decided, and current state
-  -- but not what the work is *for* -- cannot detect drift from the goal.
+- **An OBJECTIVE line exists somewhere: one sentence, what this project is
+  for and what "done" looks like.** By default it opens `master-plan.md`. A
+  project that carries no master plan by design still needs the line --
+  carry it at the top of `PROJECT-PROFILE.md`'s purpose section instead, and
+  look there when `master-plan.md` doesn't exist. Everything below the line
+  is means. A document set that records what happened, what was decided, and
+  current state -- but not what the work is *for* -- cannot detect drift from
+  the goal.
 
 ## Where the profiles live
 

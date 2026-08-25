@@ -6,6 +6,24 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.3.0
+
+- `PROJECT-INSTRUCTIONS.md`, Standing conventions: the session-numbering rule
+  is widened to any identifier that is unique only within a repo, with ADR
+  numbers named explicitly; a citation to either must now carry its repo.
+  *Cost: two different decisions in two different repos carried the same ADR
+  number, and a reader in one repo who looked the other one up found either
+  nothing or a confident wrong answer -- the same defect the session-number
+  rule was written to prevent, on a second kind of identifier nobody had
+  extended it to.*
+- `PROJECT-INSTRUCTIONS.md` and `CLOSEOUT-RITUAL.md`: the OBJECTIVE-line
+  drift check now reads the line wherever it lives -- `master-plan.md` by
+  default, `PROJECT-PROFILE.md` when a project carries no master plan by
+  design -- instead of a filename hard-coded to one file. *Cost: a project
+  with a legitimately absent master plan carried its OBJECTIVE line in
+  `PROJECT-PROFILE.md` instead, and the closeout ritual's drift check had no
+  branch for that case -- it silently didn't run for two sessions running.*
+
 ## 1.2.0
 
 - `CLOSEOUT-RITUAL.md`: re-pasting the Instructions field is now a **required
