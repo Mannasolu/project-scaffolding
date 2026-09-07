@@ -6,6 +6,18 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.5.0
+
+- `CLOSEOUT-RITUAL.md`, Then/step 5 and The commit pattern: the closeout now commits in two commits -- WORKING-AGREEMENT.md, ADRs, and session logs first; the handoff brief second, stamped with the hash of the first commit. The stamp is bumped as part of writing the brief, never by hand afterward.
+  *Cost: a single-commit closeout requires the brief to be stamped before the commit carrying it exists, so the stamp names the parent while bin/scaffold-freshness compares against the child, and the ancestry test can never pass. One project left the check red for six consecutive sessions, twice attempting to fix it by amending the commit and re-stamping, and drafted two code changes to the tool before the ritual was identified as the actual defect.*
+
+## 1.4.0
+
+- `PROJECT-INSTRUCTIONS.md`, Standing conventions: added a verification-comparison rule requiring an expected hash, count, or checksum to be generated from a real read, never recalled or retyped.
+  *Cost: two comparisons in the same session were checked against a fabricated expected value rather than one computed from the actual file; both apparent "mismatches" were the fabrication, not a real error, but the pattern is indistinguishable from a genuine verification failure until traced back.*
+- `PROJECT-INSTRUCTIONS.md`, added near the OBJECTIVE-drift check: a project should periodically check its own settled methods against current outside practice, not only its own internal consistency.
+  *Cost: nineteen sessions of internally consistent reasoning about backup strategy, secrets handling, and provisioning tooling had never been checked against what practitioners currently do; one of the four items checked was confirmed as the most serious open risk in the project.*
+
 ## 1.3.0
 
 - `PROJECT-INSTRUCTIONS.md`, Standing conventions: the session-numbering rule

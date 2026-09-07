@@ -84,7 +84,7 @@ several specific corrections usually collapse into one general principle.
 
 ## Then
 
-5. Save and commit to the repo with a git message that names the session.
+5. **Commit in two commits, in this order.** First: WORKING-AGREEMENT.md, any new or changed ADRs, and the session logs. Second: the handoff brief, stamped with the hash of the first commit. Writing the brief and the thing the brief cites into one commit makes the brief unable to name a hash that exists yet, and bin/scaffold-freshness then reports the brief stale at every closeout -- a red check the operator learns to ignore. The stamp is bumped as part of writing the brief, never by hand afterward.
 6. Before ending, state the single next step, so the next session opens with no
    guessing.
 7. **Last: re-paste the Instructions field.** Required, not an open item --
@@ -93,10 +93,13 @@ several specific corrections usually collapse into one general principle.
 
 ## The commit pattern
 
-```
-git add docs/ *.md
+```bash
+git add WORKING-AGREEMENT.md docs/decisions/ docs/session-logs/
 git commit -m "session NNN: short description"
-git push
+git log -1 --format=%h   # stamp the brief with this
+
+git add docs/planning/handoff-brief.md
+git commit -m "session NNN: handoff brief" && git push
 ```
 
 ## The required last step: re-paste the Instructions field

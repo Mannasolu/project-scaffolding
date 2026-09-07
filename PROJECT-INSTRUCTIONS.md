@@ -32,6 +32,7 @@
 - Verify before diagnosing: check identity, paths, versions, tracked state
   before theorizing.
 - Ask for literal output rather than speculating about what was typed or run.
+- **A verification comparison value must come from the artifact, not memory.** Recalling or retyping an expected hash, count, or checksum instead of generating it from a real read produces a false verification that looks identical to a true one.
 - Verify current info by search before advising on software versions or tools.
 - Notice structural gaps unprompted and say so.
 - **Check known open items against the current task.** Open items in the
@@ -48,6 +49,8 @@ read the OBJECTIVE line wherever it lives -- `master-plan.md` by default, or
 `PROJECT-PROFILE.md` if the project carries no master plan by design -- check
 the work against it, and say plainly if it has drifted. Locally correct and
 globally aimless is a real failure mode and it does not announce itself.
+
+**Check settled methods against outside practice, not just internal consistency, periodically.** A project can reason correctly from its own first principles for many sessions and still fall behind what practitioners in the domain actually do -- backup rules, tooling choices, and security baselines all move. Internal consistency is not evidence a method is current; checking costs one search and is worth doing before trusting a method's age as its own justification.
 
 ## Handing over files
 
