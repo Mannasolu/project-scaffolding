@@ -5,35 +5,38 @@
 # 007-008 have no built-in staleness signal: OPERATOR-PROFILE.md, copied by
 # hand from the upstream operator, and docs/planning/handoff-brief.md, which
 # goes stale the moment this repo's own decision record moves past it -- even
-# though nothing "copied" it from anywhere. A brief that sends a session to
-# verify a question ADR-005 already closed is the same defect as a knowledge
-# base serving a two-session-stale brief: a claim nobody re-checked against
-# the thing that actually changed. This script makes both checkable by grep
-# instead of by inference. (The third hop, the AI project's Instructions
-# field, has no API and isn't checkable from here.)
+# though nothing "copied" it from anywhere. This script makes both checkable
+# by grep instead of by inference. (The third hop, the AI project's
+# Instructions field, has no API and isn't checkable from here.)
 #
 # Stamp format, one line near the top of each file:
 #   **Stamped:** <short-sha> (<date>)
 #
-# For OPERATOR-PROFILE.md, the stamp is the commit that last touched
-# OPERATOR-PROFILE.md in the upstream (operator) repo, at the time this copy
-# was made. For handoff-brief.md, the stamp is this repo's own HEAD at the
-# time the brief was last written -- checked against the newest commit that
-# touched docs/decisions/ or WORKING-AGREEMENT.md since.
+# OPERATOR-PROFILE.md is compared by CONTENT, three-way, with the stamp as the
+# merge base. A stamp alone cannot tell "upstream moved" from "local copy was
+# edited" from "both moved" -- and the last case is where "re-copy" destroys
+# local edits. Before hashing,
+# the **Stamped:** line is removed and blank runs squeezed, since upstream
+# never carries a stamp. Everything else, including Last updated, counts.
 #
-# Exit codes, so something can gate on this instead of scraping the text:
-#   0  fresh   -- every check that could run found its copy up to date
-#   1  stale   -- at least one copy is confirmed behind its source
-#   2  unknown -- at least one check could not run (no stamp, unreachable
-#                 upstream, gh unavailable, not a git repo) and none of the
-#                 checks that did run found staleness
+#   local == upstream head         -> fresh (stamp may just need bumping)
+#   local == upstream at stamp     -> stale, re-copy is safe
+#   local == neither               -> DIVERGED, re-copy is NOT safe
 #
-# ADR-007's known limit still applies to all three codes: this script cannot
-# see the Instructions field on claude.ai -- no API reads or writes it. A
-# fresh (0) exit means the two on-disk copies this script can check are
-# current; it says nothing about whether the AI project has loaded them, and
-# must never be read, worded, or gated on as if it did. That hop's only
-# mitigation is the closeout ritual's required re-paste step.
+# For handoff-brief.md, the stamp is this repo's own commit at the time the
+# brief was written -- checked against the newest commit that touched
+# docs/decisions/ or WORKING-AGREEMENT.md. That check reads history, not a
+# copied file, so the stamp-vs-content defect does not apply to it.
+#
+# Exit codes:
+#   0  fresh    -- every check that could run found its copy up to date
+#   1  stale    -- at least one copy is confirmed behind or diverged from its
+#                  source (read the message: diverged is not re-copyable)
+#   2  unknown  -- at least one check could not run and none found staleness
+#
+# ADR-007's known limit applies to all codes: this script cannot see the
+# Instructions field on claude.ai. A fresh (0) exit says nothing about
+# whether the AI project loaded these files.
 #
 # Usage: bin/scaffold-freshness
 set -euo pipefail
@@ -49,11 +52,20 @@ STATUS=$EXIT_FRESH
 mark_stale() { STATUS=$EXIT_STALE; }
 mark_unknown() { [ "$STATUS" -eq $EXIT_STALE ] || STATUS=$EXIT_UNKNOWN; }
 
-# grep exits 1 on no-match, which set -e would treat as a hard failure in a
-# plain assignment. Always route through this so "no stamp" is data, not a
-# crash.
 stamp_of() {
   grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" 2>/dev/null | awk '{print $2}' || true
+}
+
+# Raw upstream content of OPERATOR-PROFILE.md at a ref. Non-zero on failure.
+upstream_profile_at() {
+  gh api -H 'Accept: application/vnd.github.raw+json' \
+    "repos/${OPERATOR_UPSTREAM}/contents/OPERATOR-PROFILE.md?ref=$1" 2>/dev/null
+}
+
+# Hash of content with the per-copy stamp line removed and blank runs squeezed.
+# Takes content as $1 so local and upstream pass through identical handling.
+content_hash() {
+  printf '%s\n' "$1" | sed '/^\*\*Stamped:\*\*/d' | cat -s | sha256sum | awk '{print $1}'
 }
 
 echo "== OPERATOR-PROFILE.md vs. ${OPERATOR_UPSTREAM} =="
@@ -62,27 +74,51 @@ if [ -d export ]; then
 elif [ ! -f OPERATOR-PROFILE.md ]; then
   echo "  not present"
   mark_unknown
+elif ! { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }; then
+  echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+  mark_unknown
 else
   local_stamp="$(stamp_of OPERATOR-PROFILE.md)"
-  if [ -z "$local_stamp" ]; then
-    echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
+  head_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
+    --jq '.[0].sha' 2>/dev/null || true)"
+  if [ -z "$head_sha" ] || ! head_content="$(upstream_profile_at "$head_sha")"; then
+    echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
     mark_unknown
-  elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    remote_sha="$(gh api "repos/${OPERATOR_UPSTREAM}/commits?path=OPERATOR-PROFILE.md&sha=${BRANCH}&per_page=1" \
-      --jq '.[0].sha[0:7]' 2>/dev/null || true)"
-    if [ -z "$remote_sha" ]; then
-      echo "  could not reach ${OPERATOR_UPSTREAM} to compare"
+  else
+    local_hash="$(content_hash "$(cat OPERATOR-PROFILE.md)")"
+    head_hash="$(content_hash "$head_content")"
+    head_short="${head_sha:0:7}"
+    diff_cmd="diff <(gh api -H 'Accept: application/vnd.github.raw+json' 'repos/${OPERATOR_UPSTREAM}/contents/OPERATOR-PROFILE.md?ref=${head_short}') OPERATOR-PROFILE.md"
+
+    if [ "$local_hash" = "$head_hash" ]; then
+      if [ -n "$local_stamp" ] && [[ "$head_sha" == "$local_stamp"* ]]; then
+        echo "  up to date (${head_short})"
+      else
+        echo "  up to date by content; stamp '${local_stamp:-none}' should read ${head_short}"
+      fi
+    elif [ -z "$local_stamp" ]; then
+      echo "  differs from upstream ${head_short} and has no stamp -- cannot tell stale from locally edited."
+      echo "  Inspect before re-copying: ${diff_cmd}"
       mark_unknown
-    elif [ "$local_stamp" = "$remote_sha" ]; then
-      echo "  up to date (${local_stamp})"
+    elif ! stamp_content="$(upstream_profile_at "$local_stamp")"; then
+      echo "  stamp ${local_stamp} not found upstream -- cannot establish the merge base."
+      echo "  Inspect before re-copying: ${diff_cmd}"
+      mark_unknown
+    elif [ "$local_hash" = "$(content_hash "$stamp_content")" ]; then
+      echo "  STALE -- unedited copy of ${local_stamp}; upstream is now ${head_short}."
+      echo "  Safe to re-copy by hand from the upstream repo and restamp ${head_short}."
+      mark_stale
     else
-      echo "  STALE -- local copy stamped ${local_stamp}, upstream OPERATOR-PROFILE.md is now ${remote_sha}."
-      echo "  Re-copy OPERATOR-PROFILE.md by hand from the upstream repo; this file is never auto-synced."
+      if [[ "$head_sha" == "$local_stamp"* ]]; then
+        echo "  DIVERGED -- stamp ${local_stamp} is current upstream, but the content was edited locally."
+      else
+        echo "  DIVERGED -- local copy matches neither its stamp (${local_stamp}) nor upstream (${head_short})."
+      fi
+      echo "  Do NOT re-copy yet: that discards the local edits. Inspect:"
+      echo "    ${diff_cmd}"
+      echo "  Promote any operator-tier rule upstream first, then re-copy and restamp."
       mark_stale
     fi
-  else
-    echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
-    mark_unknown
   fi
 fi
 
@@ -119,12 +155,11 @@ case "$STATUS" in
     echo "here can check that hop (ADR-007)."
     ;;
   "$EXIT_STALE")
-    echo "stale -- at least one copy above is confirmed behind its source."
+    echo "stale -- at least one copy above is behind or diverged from its source."
     ;;
   "$EXIT_UNKNOWN")
-    echo "unknown -- at least one check above could not run (see \"cannot verify\""
-    echo "or \"could not reach\" lines). Nothing confirmed stale, but freshness"
-    echo "isn't confirmed either."
+    echo "unknown -- at least one check above could not run. Nothing confirmed"
+    echo "stale, but freshness isn't confirmed either."
     ;;
 esac
 exit "$STATUS"

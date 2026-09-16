@@ -6,6 +6,11 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.6.0
+
+- `bin/scaffold-freshness`, OPERATOR-PROFILE.md check: compares content three-way with the stamp as merge base, instead of comparing the stamp alone. Reports fresh, stale (re-copy safe), or diverged (re-copy not safe -- promote local edits upstream first). The stamp line is stripped before hashing, since upstream never carries one.
+  *Cost: a stamp cannot distinguish "upstream moved" from "local copy was edited" from "both moved." The tool reported an edited copy as fresh, and for the both-moved case prescribed a re-copy that would silently discard local edits. One project's copy carried a stamp comment asserting its contents were identical to upstream; they were not, and the tool agreed with the false claim.*
+
 ## 1.5.0
 
 - `CLOSEOUT-RITUAL.md`, Then/step 5 and The commit pattern: the closeout now commits in two commits -- WORKING-AGREEMENT.md, ADRs, and session logs first; the handoff brief second, stamped with the hash of the first commit. The stamp is bumped as part of writing the brief, never by hand afterward.
