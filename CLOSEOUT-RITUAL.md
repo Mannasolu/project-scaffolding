@@ -120,11 +120,27 @@ ADR-007's "Known limit."
 
 So the assistant's part of this step is not "do it." It is:
 
-1. **Output the current, post-commit text of all three files** --
-   `PROJECT-INSTRUCTIONS.md`, `OPERATOR-PROFILE.md`, `PROJECT-PROFILE.md` --
-   in full, ready to paste, at every closeout. Not a diff, not a summary of
-   what changed in them -- the complete text, every time, because a partial
-   paste is a new way to get this wrong.
+1. **Hand over the command that prints all three files, plus a digest** --
+   never the assistant's own reproduction of their text. The assistant has
+   read those files; retyping them from that reading puts model output into
+   the Instructions field in place of what git holds, and a paste that came
+   from the model cannot afterward be checked against the model. A partial
+   paste is one way to get this wrong; a fluent, complete, subtly wrong one
+   is worse, because it looks right.
+
+       cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
+
+   The digest is the last line pasted and covers the three files only, not
+   itself. The next session's load check echoes that line verbatim and the
+   operator compares it to one generated fresh:
+
+       cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1
+
+   A stale field carries a stale digest and fails loudly. An assistant
+   reporting from memory instead of reading cannot produce 64 matching hex
+   characters. This also closes what version markers could not: two of the
+   three files carry no version line at all, so the marker check can only
+   ever pass on one of them. The digest does not care what is inside them.
 2. **State plainly: the session is not closed until these are pasted.** Not
    "when convenient." Not carried forward as an open item -- naming it as an
    open item is exactly how it has been skipped before. It is named as the
