@@ -50,6 +50,10 @@ RETIRED=(
 # every run, not just trusted at authoring time -- a bad edit to either
 # array above must fail loudly here rather than silently deleting or
 # overwriting something it was never allowed to touch.
+#
+# Naming note: this returns true for files that are NOT upstream-owned.
+# Renaming it is_upstream_owned() would invert the meaning of every call
+# site -- see WORKING-AGREEMENT.md, open item 1.
 is_protected() {
   case "$1" in
     WORKING-AGREEMENT.md|OPERATOR-PROFILE.md|PROJECT-PROFILE.md) return 0 ;;
@@ -97,38 +101,60 @@ trap 'rm -rf "$TMP"' EXIT
 
 flat() { echo "$1" | tr / _; }
 
+# stderr is captured to a file rather than discarded. A fetch that fails for
+# auth or network reasons and a fetch that fails because the file genuinely
+# isn't upstream are indistinguishable without it -- and the caller below
+# used to assert the second one either way.
 fetch() {
-  local path="$1" out="${TMP}/$(flat "$1")"
+  local path="$1" out="${TMP}/$(flat "$1")" err="${TMP}/$(flat "$1").err"
   if [ "$MODE" = gh ]; then
     gh api "repos/${UPSTREAM}/contents/${path}?ref=${BRANCH}" \
-      -H "Accept: application/vnd.github.raw" > "$out" 2>/dev/null
+      -H "Accept: application/vnd.github.raw" > "$out" 2>"$err"
   else
     curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM}/${BRANCH}/${path}" \
-      -o "$out" 2>/dev/null
+      -o "$out" 2>"$err"
   fi
 }
 
+show_fetch_error() {
+  local err="${TMP}/$(flat "$1").err"
+  [ -s "$err" ] && sed 's/^/       /' "$err" >&2
+  return 0
+}
+
+# Name the repo being written to, in the first lines of output. This script
+# overwrites governance files in whatever directory it is run from, and it
+# used to announce only where it was reading from. A run started in the wrong
+# repo was then indistinguishable from a correct one until the diffs appeared,
+# several screens down -- by which point the approval prompt was the next
+# thing on screen.
+echo "target:   $(pwd)"
+echo "          $(git config --get remote.origin.url 2>/dev/null || echo 'no git remote')"
 echo "upstream: ${UPSTREAM}@${BRANCH} (via ${MODE})"
 if fetch VERSION; then
   echo "local  version: $(cat VERSION)"
   echo "remote version: $(cat "${TMP}/VERSION")"
 else
-  echo "could not reach upstream"
-  echo "  - private repo? gh must be authenticated: gh auth status"
-  echo "  - wrong name? current setting is ${UPSTREAM}"
+  echo "could not reach upstream" >&2
+  show_fetch_error VERSION
+  echo "  - private repo? gh must be authenticated: gh auth status" >&2
+  echo "  - wrong name? current setting is ${UPSTREAM}" >&2
   exit 1
 fi
 
 CHANGED=()
+NEW=()
 for f in "${SYNCED[@]}"; do
   if ! fetch "$f"; then
-    echo "  ?  ${f} -- not present upstream, skipped"
+    echo "  ?  ${f} -- fetch failed, skipped:" >&2
+    show_fetch_error "$f"
     continue
   fi
   t="${TMP}/$(flat "$f")"
   if [ ! -f "$f" ]; then
     echo "  +  ${f} -- new upstream"
     CHANGED+=("$f")
+    NEW+=("$f")
   elif ! cmp -s "$f" "$t"; then
     echo "  M  ${f}"
     CHANGED+=("$f")
@@ -159,7 +185,17 @@ fi
 echo
 for f in "${CHANGED[@]}"; do
   echo "=== ${f} ==="
-  diff -u "$f" "${TMP}/$(flat "$f")" 2>/dev/null || true
+  # A file that doesn't exist locally is diffed against /dev/null so its whole
+  # content prints as additions. Diffing against the missing path made diff
+  # error, and the old `2>/dev/null || true` swallowed both the error and the
+  # fact that nothing had been shown -- so the approval prompt below was
+  # answered for files whose content had never appeared on screen.
+  if [ -f "$f" ]; then
+    diff -u "$f" "${TMP}/$(flat "$f")" || true
+  else
+    echo "-- new file, full content follows --"
+    diff -u /dev/null "${TMP}/$(flat "$f")" || true
+  fi
   echo
 done
 for f in "${TO_DELETE[@]}"; do
@@ -168,6 +204,9 @@ for f in "${TO_DELETE[@]}"; do
   echo
 done
 
+if [ "${#NEW[@]}" -gt 0 ]; then
+  echo "${#NEW[@]} of the ${TOTAL} change(s) are new files shown in full above."
+fi
 printf 'apply all %d change(s)? [y/N] ' "$TOTAL"
 read -r reply
 case "$reply" in

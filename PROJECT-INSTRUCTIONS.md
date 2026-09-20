@@ -32,7 +32,13 @@
 - Verify before diagnosing: check identity, paths, versions, tracked state
   before theorizing.
 - Ask for literal output rather than speculating about what was typed or run.
-- **A verification comparison value must come from the artifact, not memory.** Recalling or retyping an expected hash, count, or checksum instead of generating it from a real read produces a false verification that looks identical to a true one.
+- **A verification comparison value must come from the artifact, not memory --
+  and not from any summary of the artifact.** Recalling or retyping an expected
+  hash, count, or checksum instead of generating it from a real read produces a
+  false verification that looks identical to a true one. An agent's or a tool's
+  *report* of a check is the same failure at one remove: a summary can truncate,
+  paraphrase, or elide the very difference being checked for. Verification
+  output is read from the artifact itself.
 - Verify current info by search before advising on software versions or tools.
 - Notice structural gaps unprompted and say so.
 - **Check known open items against the current task.** Open items in the
@@ -65,12 +71,13 @@ globally aimless is a real failure mode and it does not announce itself.
 
 ## The document set
 
-Four governance documents at repo root; project content under `docs/`.
+Six governance documents at repo root, plus README.md; project content under
+`docs/`.
 
 **Root -- how you work:**
-PROJECT-INSTRUCTIONS.md and CLOSEOUT-RITUAL.md (upstream-owned, synced),
-OPERATOR-PROFILE.md and PROJECT-PROFILE.md (yours, never synced),
-WORKING-AGREEMENT.md (this project's correction log), README.md
+PROJECT-INSTRUCTIONS.md, CLOSEOUT-RITUAL.md, and SECURITY-POSTURE.md
+(upstream-owned, synced), OPERATOR-PROFILE.md and PROJECT-PROFILE.md (yours,
+never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
 
 **docs/ -- what you're building** (rewritten per project):
 - `planning/master-plan.md` -- what and why. Rewritten as v2, v3 when the

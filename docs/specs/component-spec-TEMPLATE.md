@@ -12,6 +12,8 @@
 
 **Status:** DRAFT | AGREED | BUILT
 **Owner / role:** [who or which role owns this -- e.g. backend architect]
+**Executor model:** [the exact model the builder runs with, named in the
+command -- e.g. `claude --model <name>`. Never left to a runner's default.]
 **Depends on:** [other components or specs this needs; "none" if standalone]
 
 ## 1. Purpose

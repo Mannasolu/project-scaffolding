@@ -6,6 +6,23 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.8.0
+
+- `bin/scaffold-update`: new files are diffed against `/dev/null` so their full content prints during review; `fetch()` keeps stderr instead of discarding it, and a failed fetch no longer claims the file is "not present upstream"; the script prints its **target** directory and remote URL before anything else.
+  *Cost, three defects in one file. Manna-Solutions-llc's first install printed seven empty `=== ` sections and then asked `[y/N]` -- seven files approved with none of their content on screen, because `diff -u "$f"` against a file that does not exist yet errors and `2>/dev/null || true` swallowed both the error and the silence. `fetch()` had the same suppression on both the gh and curl paths, so an auth failure printed an assertion about upstream's contents that the script had no evidence for. And a stray shell prompt in a paste sent this script into an unidentified repo, where it listed six governance files and offered to overwrite them; what stopped it was a version number in scrollback disagreeing, not any control. The script had announced only where it read from since it was written.*
+
+- `PROJECT-INSTRUCTIONS.md`, How to respond: the verification-comparison rule now covers a tool's or an agent's **summary** of a check, not only a recalled value.
+  *Cost: a verification `grep` typed at the Claude Code prompt instead of the plain shell. An agent ran it and reported a summary containing a truncating ellipsis; the summary read as confirmation and verified nothing (Manna-Solutions-llc session 001). The same shape appeared twice more in the session that shipped this: `/memory` output was read as proving an import re-reads live when it proves only that the import resolves, and a hand-written patch was checked by re-reading it rather than by running a counter over it -- the re-reading missed what the counter caught in one run.*
+
+- `PROJECT-INSTRUCTIONS.md`, The document set: names `SECURITY-POSTURE.md` and corrects the count.
+  *Cost: the section said "four governance documents at repo root" and then listed five, omitting a sixth that `SYNCED` installs. Its ownership -- upstream-owned and overwritten, or project-local -- was determinable only by reading the sync script, while every other installed file's ownership was stated.*
+
+- `docs/specs/component-spec-TEMPLATE.md`: adds `**Executor model:**`.
+  *Cost: a bare `claude` command handed over for a site-wide content change; the stronger model was selected only because Claude Code's startup banner suggested it. The operator rule landed at that closeout -- a field in the artifact is a control, a rule in a profile is a reminder.*
+
+- `docs/session-logs/session-log-000-TEMPLATE.md`: adds `**Repo:**` under the title.
+  *Cost: session logs are numbered within a repo, and a log that ends up in the wrong repo carried nothing inside it saying where it belonged. An operator preference directing all session logs to one repo made that concrete. With the line, `git grep -n '^\*\*Repo:\*\*' docs/session-logs/` finds misfiled logs from any repo.*
+
 ## 1.7.0
 
 - `CLOSEOUT-RITUAL.md`, The required last step / item 1: the closeout now hands over the command that prints the three Instructions files **and appends a sha256 digest of exactly those three**, rather than the assistant's own reproduction of their text. The next session echoes that digest line verbatim and the operator compares it to one generated fresh in one command.

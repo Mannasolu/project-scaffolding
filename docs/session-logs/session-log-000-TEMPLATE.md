@@ -1,5 +1,7 @@
 # Session Log [NNN] -- [Layer or Workstream Title]
 
+**Repo:** [repo-name]
+
 > **What this document is:** narrative and teaching for ONE layer or workstream.
 > NOT a daily diary. It stays an open draft, accumulating timestamped sections,
 > until its subject completes -- then one editing pass makes it a coherent
