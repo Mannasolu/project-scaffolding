@@ -85,9 +85,16 @@ several specific corrections usually collapse into one general principle.
 ## Then
 
 5. **Commit in two commits, in this order.** First: WORKING-AGREEMENT.md, any new or changed ADRs, and the session logs. Second: the handoff brief, stamped with the hash of the first commit. Writing the brief and the thing the brief cites into one commit makes the brief unable to name a hash that exists yet, and bin/scaffold-freshness then reports the brief stale at every closeout -- a red check the operator learns to ignore. The stamp is bumped as part of writing the brief, never by hand afterward.
-6. Before ending, state the single next step, so the next session opens with no
+6. **Run the export check, when the project has an export.** A release that
+   stops at the source repo has shipped nothing -- downstream projects read the
+   export, not the source. Run it in the same breath as the freshness check,
+   and generate the export if it differs. *Cost: a synced file sat a version
+   behind in the export for a day and was found by accident; a later release
+   was caught by the export's own leak guard only because someone ran the check
+   by hand. Nothing triggers it.*
+7. Before ending, state the single next step, so the next session opens with no
    guessing.
-7. **Last: re-paste the Instructions field.** Required, not an open item --
+8. **Last: re-paste the Instructions field.** Required, not an open item --
    see below. This is deliberately the final step in this list so it cannot
    be buried under whatever comes after it.
 
