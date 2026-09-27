@@ -58,6 +58,14 @@ globally aimless is a real failure mode and it does not announce itself.
 
 **Check settled methods against outside practice, not just internal consistency, periodically.** A project can reason correctly from its own first principles for many sessions and still fall behind what practitioners in the domain actually do -- backup rules, tooling choices, and security baselines all move. Internal consistency is not evidence a method is current; checking costs one search and is worth doing before trusting a method's age as its own justification.
 
+**An alert is part of a control only when its delivery is proven and its
+acknowledgement is owned.** Detection plus a send is half a control, and it
+reads as a whole one. Prove the delivery path end to end on a schedule, with a
+check that does not travel the path it is checking. Give every alert an owner
+and a record of acknowledgement. An alert that repeats unacknowledged must
+escalate -- into a channel with demonstrated attention, such as the
+session-opening check -- rather than repeat.
+
 ## Handing over files
 
 - **Ship files under their final names.** Never hand over a rename step; it gets

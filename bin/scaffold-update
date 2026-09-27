@@ -28,6 +28,7 @@ SYNCED=(
   SECURITY-POSTURE.md
   bin/scaffold-update
   bin/scaffold-freshness
+  bin/scaffold-brief-check
   docs/specs/component-spec-TEMPLATE.md
   docs/decisions/adr-TEMPLATE.md
   docs/session-logs/session-log-000-TEMPLATE.md
@@ -224,7 +225,13 @@ case "$reply" in
       rm -f "$f"
       echo "removed ${f}"
     done
-    chmod +x bin/scaffold-update bin/scaffold-freshness 2>/dev/null || true
+    # Every synced script gets its execute bit, by pattern rather than by name:
+    # a fetched file lands 644, and a named list here went stale the first time
+    # a script was added to SYNCED (bin/scaffold-brief-check, scaffolding
+    # session 023). No error suppression -- a chmod that fails should say so.
+    for f in "${SYNCED[@]}"; do
+      case "$f" in bin/*) [ -f "$f" ] && chmod +x "$f" ;; esac
+    done
     echo
     echo "Done. Re-paste PROJECT-INSTRUCTIONS.md into the Instructions field --"
     echo "the file on disk is not what the AI project loaded."

@@ -6,6 +6,25 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.9.0
+
+**Upgrade note: the first closeout after this sync will block until the brief passes `bin/scaffold-brief-check`.** Run it once right after syncing. The brief needs exactly one `**Stamped:** <short-sha> (<YYYY-MM-DD>)` line, the OBJECTIVE paragraph quoted verbatim from `master-plan.md` (or `PROJECT-PROFILE.md` when there is no master plan), and every repo path it cites tracked -- or waived, one path per line with a comment saying why, in `.briefcheckignore`.
+
+- `bin/scaffold-brief-check`: new, and synced. Checks the handoff brief against its repo: every cited repo path is tracked or explicitly waived; the OBJECTIVE is quoted verbatim, compared word for word; and the stamp is in the one parseable form and names a commit that exists.
+  *Cost, three failures of one document. A session closed with its brief citing, as done, a file that had been written only in chat and never saved; the next session's first act was "No such file or directory." A brief compressed its project's objective to a shorter phrase, and three sessions scored themselves as drifting against the compression instead of the objective. A closeout wrote the stamp as prose; `bin/scaffold-freshness` could not parse it and exited 2, and the next opening's check chain skipped the checks after it. The stamp form existed only in the brief template, and nothing compared a brief to anything.*
+
+- `CLOSEOUT-RITUAL.md`, step 5 and the commit pattern: states the stamp form, and chains `bin/scaffold-brief-check &&` in front of the brief commit.
+  *Cost: a rule written in the ritual must be recalled at the right moment; a check chained in front of the commit it guards runs whether anyone remembers it or not.*
+
+- `bin/scaffold-update`: syncs `bin/scaffold-brief-check`, and sets the execute bit on every synced `bin/` script by pattern, with no error suppression.
+  *Cost: the ritual change above first landed without the script in `SYNCED`, so the next sync would have delivered a closeout step calling a script the project did not have -- or an older local copy lacking two of the three checks. The execute bit was set on a hand-named list of two scripts, which went stale the moment a third was added.*
+
+- `bin/scaffold-freshness`: no longer discards stderr when reading a stamp or fetching the upstream profile.
+  *Cost: an unreadable file read as "no stamp found," and an auth failure read the same as a ref that does not exist. Same rule, and same shape, as the `fetch()` defect fixed in 1.8.0.*
+
+- `PROJECT-INSTRUCTIONS.md`: an alert is part of a control only when its delivery is proven and its acknowledgement is owned.
+  *Cost: a daily check flagged a server's own checkout as behind, three mornings running, and each run logged that its report was mailed. Nothing acted on it. The checkout fell about eight sessions behind and was found by accident. Whether the mail was never delivered or never read is still unknown -- and either way, every other check that mails on failure through the same path was no control either.*
+
 ## 1.8.0
 
 - `bin/scaffold-update`: new files are diffed against `/dev/null` so their full content prints during review; `fetch()` keeps stderr instead of discarding it, and a failed fetch no longer claims the file is "not present upstream"; the script prints its **target** directory and remote URL before anything else.

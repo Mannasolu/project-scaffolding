@@ -85,6 +85,16 @@ several specific corrections usually collapse into one general principle.
 ## Then
 
 5. **Commit in two commits, in this order.** First: WORKING-AGREEMENT.md, any new or changed ADRs, and the session logs. Second: the handoff brief, stamped with the hash of the first commit. Writing the brief and the thing the brief cites into one commit makes the brief unable to name a hash that exists yet, and bin/scaffold-freshness then reports the brief stale at every closeout -- a red check the operator learns to ignore. The stamp is bumped as part of writing the brief, never by hand afterward.
+   The stamp line has exactly one form, the one `bin/scaffold-freshness` parses:
+   `**Stamped:** <short-sha> (<YYYY-MM-DD>)`, optionally followed by
+   ` -- <note>`. **Before the second commit, `bin/scaffold-brief-check` must
+   exit 0.** It checks that every path the brief cites is tracked, that the
+   OBJECTIVE is quoted verbatim, and that the stamp is well-formed and names a
+   real commit. A non-zero exit means fix the brief, not the check. The commit
+   pattern below chains the two, so the commit cannot land without the check.
+   *Cost: a downstream closeout wrote its stamp as prose; freshness exited 2 at
+   the next opening and the check chain skipped the checks after it. The form
+   lived only in the brief template, and nothing compared the brief to it.*
 6. **Run the export check, when the project has an export.** A release that
    stops at the source repo has shipped nothing -- downstream projects read the
    export, not the source. Run it in the same breath as the freshness check,
@@ -106,7 +116,7 @@ git commit -m "session NNN: short description"
 git log -1 --format=%h   # stamp the brief with this
 
 git add docs/planning/handoff-brief.md
-git commit -m "session NNN: handoff brief" && git push
+bin/scaffold-brief-check && git commit -m "session NNN: handoff brief" && git push
 ```
 
 ## The required last step: re-paste the Instructions field

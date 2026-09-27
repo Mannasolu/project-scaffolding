@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Verify the handoff brief against the repo it describes. Three checks:
+#
+#   1. References -- every repo-relative path the brief names is tracked.
+#   2. Objective  -- the brief quotes the OBJECTIVE verbatim from its source.
+#   3. Stamp      -- exactly one **Stamped:** <sha> (<date>) line, naming a
+#                    commit that exists in this repo.
+#
+# Why (1): a session wrote its primary output as a chat heredoc that was never
+# run, then closed with the brief citing that file as done. The next session
+# opened, ran `cat` on the path, and got "No such file or directory" as its
+# first act. Nothing in the document set detected a citation to a file that
+# was never written.
+#
+# Why (2): a brief compressed its project's objective to a shorter phrase, and
+# three later sessions scored themselves as drifting against the compression
+# rather than the objective. A brief that paraphrases the objective can walk
+# every reader away from it. The rule: the brief quotes, it never paraphrases.
+#
+# Why (3): a closeout wrote the stamp as prose. bin/scaffold-freshness could not
+# parse it and exited 2, and the next session's opening check chain skipped the
+# checks after it. The form lived only in the brief template, and nothing
+# compared the brief against it.
+#
+# bin/scaffold-freshness checks whether copies are BEHIND their sources. This
+# checks whether the brief's references RESOLVE and whether its objective is
+# the real one. A stale file says something true about an older world; a
+# dangling reference or a paraphrased objective says something false now.
+#
+# Deliberately dumb. It does not guess whether an absence is intentional --
+# heuristics on prose ("not yet", "unbuilt") misfire in both directions. A
+# path that is legitimately absent is waived by hand in .briefcheckignore, one
+# path per line, so every waiver is a decision somebody wrote down.
+#
+# Objective comparison: the paragraph beginning **OBJECTIVE:** in the source
+# (docs/planning/master-plan.md, or PROJECT-PROFILE.md in a project that
+# carries no master plan) against the same paragraph in the brief. Blockquote
+# markers and line wrapping are ignored; every word must match.
+#
+# Known limit: a path that belongs to another repo (after `cd ~/other && ...`)
+# is checked against this one. Same-named files will resolve falsely.
+#
+# Exit codes:
+#   0  sound    -- paths resolve or are waived; objective matches; stamp valid
+#   1  defect   -- a path dangles, the objective is missing or differs, or
+#                  the stamp is missing, duplicated, malformed, or unresolved
+#   2  unknown  -- the check could not run (no brief, not a git repo)
+#
+# Usage: bin/scaffold-brief-check
+set -euo pipefail
+
+BRIEF="${SCAFFOLD_BRIEF:-docs/planning/handoff-brief.md}"
+IGNORE="${SCAFFOLD_BRIEF_IGNORE:-.briefcheckignore}"
+
+EXIT_SOUND=0
+EXIT_DEFECT=1
+EXIT_UNKNOWN=2
+
+if [ ! -f "$BRIEF" ]; then
+  echo "== ${BRIEF} =="
+  echo "  not present -- cannot check"
+  exit $EXIT_UNKNOWN
+fi
+
+if ! git rev-parse --git-dir >/dev/null; then
+  echo "== ${BRIEF} =="
+  echo "  not a git repo -- cannot check"
+  exit $EXIT_UNKNOWN
+fi
+
+if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+  echo "== ${BRIEF} =="
+  echo "  repo has no commits -- cannot check"
+  exit $EXIT_UNKNOWN
+fi
+
+defects=0
+
+# ---------------------------------------------------------------- references
+
+# Roots are this repo's own tracked top-level directories, so the script
+# needs no per-project list. Absolute paths, ~ paths, and URLs belong to
+# machines and remotes and are none of this script's business.
+roots="$(git ls-tree -d --name-only HEAD | sed 's/[]\\.*^$()+?{}|[]/\\&/g' | paste -sd'|' -)"
+
+echo "== ${BRIEF} -- do its references resolve? =="
+
+cited=""
+if [ -n "$roots" ]; then
+  # grep exits 1 on no-match; `|| true` makes "brief cites nothing" data,
+  # not a crash. stderr is left visible so a read failure is not silent.
+  cited="$(grep -oE "(^|[^A-Za-z0-9._/~-])(${roots})/[A-Za-z0-9._/-]*" "$BRIEF" \
+    | grep -oE "(${roots})/[A-Za-z0-9._/-]*" \
+    | sed 's/[.,:;)]*$//' \
+    | sort -u || true)"
+fi
+
+waived=""
+if [ -f "$IGNORE" ]; then
+  waived="$(grep -vE '^[[:space:]]*(#|$)' "$IGNORE" | sed 's/[[:space:]]*$//' || true)"
+fi
+
+if [ -z "$cited" ]; then
+  echo "  no repo-relative paths cited"
+else
+  n_ok=0; n_waived=0; n_bad=0
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    # ls-files matches a tracked file at that path or any tracked file
+    # beneath it if the path is a directory; empty output means neither.
+    if [ -n "$(git ls-files -- "$path")" ]; then
+      n_ok=$((n_ok + 1))
+    elif [ -n "$waived" ] && printf '%s\n' "$waived" | grep -Fxq -- "$path"; then
+      echo "  WAIVED   ${path}  (listed in ${IGNORE})"
+      n_waived=$((n_waived + 1))
+    else
+      echo "  DANGLING ${path}"
+      n_bad=$((n_bad + 1))
+    fi
+  done <<< "$cited"
+  echo "  ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling"
+  if [ "$n_bad" -gt 0 ]; then
+    echo "  -> the file was never written (write it), or its absence is"
+    echo "     intentional (add the path to ${IGNORE} with a comment saying why)"
+    defects=$((defects + 1))
+  fi
+fi
+
+# ----------------------------------------------------------------- objective
+
+# Print the paragraph that starts at **OBJECTIVE:**, blockquote markers
+# stripped, lines joined, whitespace collapsed. Empty if there is none.
+extract_objective() {
+  awk '
+    { line = $0; sub(/^[[:space:]]*>[[:space:]]?/, "", line) }
+    !found && index(line, "**OBJECTIVE:**") { found = 1; line = substr(line, index(line, "**OBJECTIVE:**")) }
+    found { if (line ~ /^[[:space:]]*$/) exit; print line }
+  ' "$1" | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'
+}
+
+if [ -n "${SCAFFOLD_OBJECTIVE_SOURCE:-}" ]; then
+  source_file="$SCAFFOLD_OBJECTIVE_SOURCE"
+elif [ -f docs/planning/master-plan.md ]; then
+  source_file="docs/planning/master-plan.md"
+else
+  source_file="PROJECT-PROFILE.md"
+fi
+
+echo
+echo "== ${BRIEF} -- does it quote the OBJECTIVE from ${source_file}? =="
+
+if [ ! -f "$source_file" ]; then
+  echo "  ${source_file} not present -- no objective source to check against"
+  defects=$((defects + 1))
+else
+  want="$(extract_objective "$source_file")"
+  have="$(extract_objective "$BRIEF")"
+  if [ -z "$want" ]; then
+    echo "  ${source_file} has no **OBJECTIVE:** paragraph -- the method requires one"
+    defects=$((defects + 1))
+  elif [ -z "$have" ]; then
+    echo "  brief has no **OBJECTIVE:** paragraph -- quote it from ${source_file}"
+    defects=$((defects + 1))
+  elif [ "$want" = "$have" ]; then
+    echo "  verbatim"
+  else
+    echo "  DIFFERS -- word diff, < source, > brief:"
+    diff <(tr ' ' '\n' <<< "$want") <(tr ' ' '\n' <<< "$have") | sed 's/^/    /' || true
+    defects=$((defects + 1))
+  fi
+fi
+
+# --------------------------------------------------------------------- stamp
+
+# Exactly one stamp line, in the template's form, naming a commit that exists
+# here. bin/scaffold-freshness reads the sha; a stamp it cannot parse makes it
+# exit 2 at the NEXT session's opening. This catches it at closeout instead.
+STAMP_RE='^\*\*Stamped:\*\* [0-9a-f]{7,40} \([0-9]{4}-[0-9]{2}-[0-9]{2}\)( -- .*)?$'
+
+echo
+echo "== ${BRIEF} -- is its stamp well-formed? =="
+
+stamps="$(grep -E '^\*\*Stamped:\*\*' "$BRIEF" || true)"
+n_stamps=0
+[ -z "$stamps" ] || n_stamps="$(printf '%s\n' "$stamps" | wc -l)"
+
+if [ "$n_stamps" -eq 0 ]; then
+  echo "  no **Stamped:** line -- add '**Stamped:** <short-sha> (<YYYY-MM-DD>)'"
+  defects=$((defects + 1))
+elif [ "$n_stamps" -gt 1 ]; then
+  echo "  ${n_stamps} **Stamped:** lines -- exactly one allowed:"
+  printf '%s\n' "$stamps" | sed 's/^/    /'
+  defects=$((defects + 1))
+elif ! printf '%s\n' "$stamps" | grep -qE "$STAMP_RE"; then
+  echo "  MALFORMED  ${stamps}"
+  echo "  -> expected '**Stamped:** <short-sha> (<YYYY-MM-DD>)', optionally followed by ' -- <note>'"
+  defects=$((defects + 1))
+else
+  sha="$(printf '%s\n' "$stamps" | awk '{print $2}')"
+  if git cat-file -e "${sha}^{commit}"; then
+    echo "  ${sha} -- well-formed, commit exists"
+  else
+    echo "  ${sha} -- well-formed, but no such commit in this repo"
+    defects=$((defects + 1))
+  fi
+fi
+
+echo
+if [ "$defects" -gt 0 ]; then
+  echo "defect -- ${defects} check(s) failed"
+  exit $EXIT_DEFECT
+fi
+echo "sound -- paths resolve or are waived; objective verbatim; stamp valid"
+exit $EXIT_SOUND

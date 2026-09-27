@@ -53,13 +53,13 @@ mark_stale() { STATUS=$EXIT_STALE; }
 mark_unknown() { [ "$STATUS" -eq $EXIT_STALE ] || STATUS=$EXIT_UNKNOWN; }
 
 stamp_of() {
-  grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" 2>/dev/null | awk '{print $2}' || true
+  grep -m1 -oE '\*\*Stamped:\*\* [0-9a-f]{7,40}' "$1" | awk '{print $2}' || true
 }
 
 # Raw upstream content of OPERATOR-PROFILE.md at a ref. Non-zero on failure.
 upstream_profile_at() {
   gh api -H 'Accept: application/vnd.github.raw+json' \
-    "repos/${OPERATOR_UPSTREAM}/contents/OPERATOR-PROFILE.md?ref=$1" 2>/dev/null
+    "repos/${OPERATOR_UPSTREAM}/contents/OPERATOR-PROFILE.md?ref=$1"
 }
 
 # Hash of content with the per-copy stamp line removed and blank runs squeezed.
