@@ -106,7 +106,7 @@ else
       mark_unknown
     elif [ "$local_hash" = "$(content_hash "$stamp_content")" ]; then
       echo "  STALE -- unedited copy of ${local_stamp}; upstream is now ${head_short}."
-      echo "  Safe to re-copy by hand from the upstream repo and restamp ${head_short}."
+      echo "  Safe to re-sync. From the upstream clone run: bin/scaffold-profile-sync $(pwd)"
       mark_stale
     else
       if [[ "$head_sha" == "$local_stamp"* ]]; then
@@ -116,7 +116,7 @@ else
       fi
       echo "  Do NOT re-copy yet: that discards the local edits. Inspect:"
       echo "    ${diff_cmd}"
-      echo "  Promote any operator-tier rule upstream first, then re-copy and restamp."
+      echo "  Promote any operator-tier rule upstream first, then from the upstream clone run: bin/scaffold-profile-sync $(pwd)"
       mark_stale
     fi
   fi
