@@ -102,8 +102,12 @@ several specific corrections usually collapse into one general principle.
    behind in the export for a day and was found by accident; a later release
    was caught by the export's own leak guard only because someone ran the check
    by hand. Nothing triggers it.*
-7. Before ending, state the single next step, so the next session opens with no
-   guessing.
+7. **Before ending, write the "Opening the next chat" block at the end of the
+   handoff brief:** the single next step, the command that prints the three
+   profiles and their digest, the command that prints the brief with a fresh
+   digest, and the first message to paste, including the digest comparison.
+   The next session opens from that block with no guessing. A start-of-session
+   step belongs at the end of the document the closeout already writes.
 8. **Last: re-paste the Instructions field.** Required, not an open item --
    see below. This is deliberately the final step in this list so it cannot
    be buried under whatever comes after it.
@@ -132,8 +136,7 @@ bury it again.
 and `PROJECT-PROFILE.md` live in git; the AI project's Instructions field has
 no API. Nothing on any machine you own can read or write it. The only
 transport is a human pasting. `bin/scaffold-freshness` checks the other two
-hand-moved documents in this practice -- it cannot check this one; see
-ADR-007's "Known limit."
+hand-moved documents in this practice; it cannot check this one.
 
 So the assistant's part of this step is not "do it." It is:
 

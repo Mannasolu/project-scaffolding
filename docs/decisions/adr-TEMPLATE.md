@@ -24,3 +24,7 @@
 ## Consequences
 > What this decision makes easy, and what it makes hard or forecloses. Both. An
 > honest ADR names the cost it accepted, not just the benefit it bought.
+
+## Open questions
+> Anything this decision leaves unresolved, each with a **Waits on:** line.
+> "None" is a valid answer; write it rather than deleting the section.

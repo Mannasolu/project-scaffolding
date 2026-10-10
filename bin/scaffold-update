@@ -15,7 +15,16 @@
 # Usage:  bin/scaffold-update            # show what changed, then ask
 #         bin/scaffold-update --check    # report only, change nothing
 #         SCAFFOLD_UPSTREAM=owner/repo bin/scaffold-update
+#
+# Exit codes for --check: 0 up to date, 1 behind (any file to add, change, or
+# delete), 2 could not determine -- upstream unreachable, or any single file
+# could not be fetched. A full run that cannot fetch every file applies
+# nothing and exits 2: SYNCED is upstream's own list, so a missing file is a
+# fault, not a normal case. Other errors keep their exit codes.
 set -euo pipefail
+
+# The arguments as given, kept for the self-update re-exec at the end.
+ORIG_ARGS=("$@")
 
 UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding}"
 BRANCH="${SCAFFOLD_BRANCH:-main}"
@@ -130,7 +139,17 @@ show_fetch_error() {
 # several screens down -- by which point the approval prompt was the next
 # thing on screen.
 echo "target:   $(pwd)"
-echo "          $(git config --get remote.origin.url 2>/dev/null || echo 'no git remote')"
+# No stderr redirect: a git error here is evidence, not noise. The fallback
+# text is used only when the command itself exits non-zero.
+ORIGIN_URL="$(git config --get remote.origin.url)" || ORIGIN_URL='(no origin remote)'
+echo "          ${ORIGIN_URL}"
+# Running inside the upstream repo itself: there is nothing to sync, and
+# comparing its working tree to its own origin used to report "behind
+# upstream" for ordinary uncommitted edits (open item 13).
+if [[ "$ORIGIN_URL" =~ github\.com[:/]${UPSTREAM}(\.git)?$ ]]; then
+  echo "this is the upstream repo (${UPSTREAM}); there is nothing to sync. Compare against origin with git status."
+  exit 0
+fi
 echo "upstream: ${UPSTREAM}@${BRANCH} (via ${MODE})"
 if fetch VERSION; then
   echo "local  version: $(cat VERSION)"
@@ -140,15 +159,24 @@ else
   show_fetch_error VERSION
   echo "  - private repo? gh must be authenticated: gh auth status" >&2
   echo "  - wrong name? current setting is ${UPSTREAM}" >&2
+  # --check: 2, could not determine. A full run keeps its exit 1.
+  if $CHECK_ONLY; then exit 2; fi
   exit 1
 fi
 
 CHANGED=()
 NEW=()
+FAILED=()
+in_changed() {
+  local x
+  for x in "${CHANGED[@]}"; do [ "$x" = "$1" ] && return 0; done
+  return 1
+}
 for f in "${SYNCED[@]}"; do
   if ! fetch "$f"; then
-    echo "  ?  ${f} -- fetch failed, skipped:" >&2
+    echo "  ?  ${f} -- fetch failed:" >&2
     show_fetch_error "$f"
+    FAILED+=("$f")
     continue
   fi
   t="${TMP}/$(flat "$f")"
@@ -172,6 +200,19 @@ done
 
 TOTAL=$(( ${#CHANGED[@]} + ${#TO_DELETE[@]} ))
 
+# A fetch failure is a fault, not a normal case: SYNCED is upstream's own
+# list. A file that was not compared cannot be called up to date, and nothing
+# is applied -- a partial set would leave the project between two versions.
+if [ "${#FAILED[@]}" -gt 0 ]; then
+  echo >&2
+  echo "${#FAILED[@]} file(s) could not be checked:" >&2
+  printf '  %s\n' "${FAILED[@]}" >&2
+  if ! $CHECK_ONLY; then
+    echo "applying nothing." >&2
+  fi
+  exit 2
+fi
+
 if [ "$TOTAL" -eq 0 ]; then
   echo "up to date."
   exit 0
@@ -180,7 +221,10 @@ fi
 if $CHECK_ONLY; then
   echo
   echo "${TOTAL} file(s) behind upstream. Run without --check to see diffs."
-  exit 0
+  if in_changed bin/scaffold-update; then
+    echo "This list comes from the local copy of bin/scaffold-update; after syncing, run --check again."
+  fi
+  exit 1
 fi
 
 echo
@@ -232,9 +276,31 @@ case "$reply" in
     for f in "${SYNCED[@]}"; do
       case "$f" in bin/*) [ -f "$f" ] && chmod +x "$f" ;; esac
     done
-    echo
-    echo "Done. Re-paste PROJECT-INSTRUCTIONS.md into the Instructions field --"
-    echo "the file on disk is not what the AI project loaded."
+    # The reminder fires only when the file it is about changed; one that fired
+    # on every run trained people to skip it. The command line below must match
+    # CLOSEOUT-RITUAL.md byte for byte.
+    if in_changed PROJECT-INSTRUCTIONS.md; then
+      echo
+      cat <<'EOF'
+PROJECT-INSTRUCTIONS.md changed. Re-paste the Instructions field: print the
+three files and their digest with
+
+    cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
+
+and paste the output, replacing what is there.
+EOF
+    fi
+    # Self-update: the apply loop above iterated this process's SYNCED -- the
+    # old list. A file upstream added to that list has not been fetched yet, so
+    # the new copy runs once more with the same arguments to finish the job. The
+    # variable stops a second re-exec. An EXIT trap does not run across exec,
+    # so the temp dir is removed here.
+    if in_changed bin/scaffold-update && [ -z "${SCAFFOLD_UPDATE_REEXEC:-}" ]; then
+      echo
+      echo "bin/scaffold-update itself changed; re-running the new copy so its file list applies."
+      rm -rf "$TMP"
+      SCAFFOLD_UPDATE_REEXEC=1 exec bin/scaffold-update "${ORIG_ARGS[@]}"
+    fi
     ;;
   *) echo "nothing changed." ;;
 esac

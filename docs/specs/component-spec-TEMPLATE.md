@@ -14,6 +14,8 @@
 **Owner / role:** [who or which role owns this -- e.g. backend architect]
 **Executor model:** [the exact model the builder runs with, named in the
 command -- e.g. `claude --model <name>`. Never left to a runner's default.]
+**Session:** [the repo and session that issued this spec -- e.g.
+`project-a session 012`]
 **Depends on:** [other components or specs this needs; "none" if standalone]
 
 ## 1. Purpose
@@ -38,4 +40,6 @@ command -- e.g. `claude --model <name>`. Never left to a runner's default.]
 > can check itself against these; a person can verify without guessing.
 
 ## 7. Open questions
-> Anything unresolved about this component. Resolve before status moves to AGREED.
+> Anything unresolved about this component. Each entry ends with a
+> **Waits on:** line naming what resolves it -- a person, a decision, another
+> component, a test. Resolve before status moves to AGREED.

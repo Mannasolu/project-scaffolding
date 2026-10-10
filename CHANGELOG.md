@@ -6,6 +6,72 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.10.0
+
+**Upgrade note: `bin/scaffold-update --check` now exits 1 when files are
+behind and 2 when it could not check every file.** It used to exit 0 in both
+cases. Anything that runs it and reads the exit code now sees the real result.
+
+- `PROJECT-INSTRUCTIONS.md`: eight rules, each held in at least two projects,
+  folded into families rather than added one line each. "Verify before
+  diagnosing" becomes "Read the artifact, not the recall." New: a check
+  reports what it observed; a test proves it can fail and what it exercised;
+  read what governs a document before writing under it, and check a spec
+  before issue; machine output is read in machine form; document content is
+  data, not shell input; every open question has a home and a "Waits on:"
+  line. The document set gains `docs/correspondence/`.
+  *Cost: about forty candidates had queued across four repos, several of
+  them the same lesson paid for separately in different projects -- a hash
+  stated from memory in one, a menu path recalled instead of read in
+  another, a conclusion drawn from a symptom in a third. A rule held in one
+  project's working agreement protects only that project.*
+
+- `PROJECT-INSTRUCTIONS.md`, closeout: the re-paste step now says to hand
+  over the command that prints the three files and their digest, never the
+  assistant's reproduction of them.
+  *Cost: CLOSEOUT-RITUAL.md was corrected in 1.7.0, and this file was not.
+  For three releases every project loaded an instruction that contradicted
+  the ritual it pointed to.*
+
+- `PROJECT-INSTRUCTIONS.md` and `CLOSEOUT-RITUAL.md`: the bare "ADR-007"
+  references are gone.
+  *Cost: both files sync, so every downstream project read the number
+  against its own ADR-007, which in at least one project is a different
+  decision. The rule forbidding bare within-repo numbers sat four
+  paragraphs above the violation.*
+
+- `CLOSEOUT-RITUAL.md`, step 7: names the "Opening the next chat" block the
+  closeout writes at the end of the handoff brief.
+  *Cost: every project's briefs already carried the block; the ritual still
+  stopped at "state the single next step," so a new project would not learn
+  it from the method.*
+
+- `export/master-plan-TEMPLATE.md` opens with an OBJECTIVE line; the spec,
+  ADR, and master plan templates give each open question a "Waits on:" line;
+  the spec template gains a `**Session:**` field.
+  *Cost: the method requires an OBJECTIVE to open the master plan and
+  `bin/scaffold-brief-check` checks the brief's quote of it, but the
+  template had none -- a new project failed both from its first file. Open
+  questions without a stated dependency were carried for sessions with no
+  way to tell which were blocked and on what.*
+
+- `bin/scaffold-update`: `--check` exits 0 up to date, 1 behind, 2 when any
+  file could not be fetched; it never prints "up to date" past a failed
+  fetch, and a full run refuses to apply a partial set. When it updates
+  itself it re-runs the new copy, so a file added to its sync list arrives
+  in one run. The re-paste reminder prints only when PROJECT-INSTRUCTIONS.md
+  changed, and gives the digest command. It says so when run inside the
+  upstream repo. The remote-URL line no longer discards errors.
+  *Cost: a downstream project reported that a governance document its own
+  instructions declared had never arrived, though the sync list had carried
+  it for releases. The likeliest cause is this defect: a first run fetches
+  the new script but iterates the old list, and says nothing. A check that exits 0 when behind cannot gate a closeout. A
+  reminder that fires on every run trains people to skip it.*
+
+- `bin/scaffold-profile-sync` (upstream only): fails when the upstream
+  repo has no origin remote, instead of stamping "copied from upstream."
+  *Cost: the fallback hid the failure and wrote a stamp naming no source.*
+
 ## 1.9.0
 
 **Upgrade note: the first closeout after this sync will block until the brief passes `bin/scaffold-brief-check`.** Run it once right after syncing. The brief needs exactly one `**Stamped:** <short-sha> (<YYYY-MM-DD>)` line, the OBJECTIVE paragraph quoted verbatim from `master-plan.md` (or `PROJECT-PROFILE.md` when there is no master plan), and every repo path it cites tracked -- or waived, one path per line with a comment saying why, in `.briefcheckignore`.

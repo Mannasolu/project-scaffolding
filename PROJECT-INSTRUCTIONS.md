@@ -29,8 +29,14 @@
   second, as a fallback -- in deciding mode only.
 - Explain why a layer exists and what the alternatives were.
 - Don't re-explain settled ground -- anchor to the documents.
-- Verify before diagnosing: check identity, paths, versions, tracked state
-  before theorizing.
+- **Read the artifact, not the recall.** Verify before diagnosing, and before
+  designing: check identity, paths, versions, tracked state. A conclusion, a
+  design, or a command rests on a read of the thing it is about, made now --
+  the generator or its output, not the generator's input; a tool's defaults on
+  the target, not its documentation; the screen in hand, not a remembered
+  menu; the file after the last change to it, not before; what a name
+  resolves to now, not what it resolved to when it was written. A symptom is
+  not a diagnosis; read what would settle it.
 - Ask for literal output rather than speculating about what was typed or run.
 - **A verification comparison value must come from the artifact, not memory --
   and not from any summary of the artifact.** Recalling or retyping an expected
@@ -66,6 +72,49 @@ and a record of acknowledgement. An alert that repeats unacknowledged must
 escalate -- into a channel with demonstrated attention, such as the
 session-opening check -- rather than repeat.
 
+**A check reports what it observed.** Its exit code agrees with its text: a
+check that prints a failure and exits 0 cannot gate anything, and its readers
+are often scripts. What it could not read is named and counted apart, never
+passed and never failed. A failure is recorded as an event that persists until
+acknowledged; a check that reads only current state cannot see a failure that a
+later success overwrote. Liveness is the observable output, not a precondition
+that was met. Output whose failure mode has not been seen is never suppressed:
+discarding stderr on an untested path destroys the only evidence separating
+"found nothing" from "never ran."
+
+**A test proves it can fail, and proves what it exercised.** Run a new test or
+control first against a synthetic reproduction of the failure it exists to
+catch. Assert that the targeted path ran, not only the outcome -- a test of a
+failure path can pass through the recovery path instead. A suite that is green
+on its first run gets mutation-checked; a test that expects a refusal gets a
+positive control. A stub's output is copied from the real tool, never written
+from the same assumption as the code under test. A live test runs against the
+version the target actually runs.
+
+**Read what governs a document before writing or ruling under it.** The
+template before a spec, the cited ADRs before a governance file, the prior
+ruling before a new one. A spec is checked before it is issued: each
+acceptance condition against the project's standing rules, each step for
+whether it can run from the executor's state, branch, and privilege. The
+executor's first act is to run every command the spec names, on every target
+-- a spec's commands are its author's claims about the system.
+
+**Machine output is read in machine form.** Use a tool's NUL-separated or
+delimited output where it has one. Fields that can be empty are split on a
+non-whitespace delimiter: whitespace splitting collapses an empty field and
+shifts every field after it.
+
+**Document content is data, not shell input.** Write documents with a file
+tool or deliver them as files. A heredoc breaks on the backticks and fenced
+blocks that documents contain.
+
+**Every open question has a home and a "Waits on:" line.** An open question
+lives in a list a later session reads -- a spec's or ADR's open questions, the
+master plan's queue, the brief's open items -- and names what it waits on. A
+question referred from elsewhere enters that list before any decision is made
+about it. A question kept only in a chat, or in a brief that gets overwritten,
+is lost.
+
 ## Handing over files
 
 - **Ship files under their final names.** Never hand over a rename step; it gets
@@ -98,6 +147,11 @@ never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
 - `specs/` -- one component spec per component, precise enough for an agent.
 - `decisions/` -- ADRs. One per significant decision, with alternatives and the
   cost accepted.
+- `correspondence/` -- letters between projects. Outbound is committed in
+  the same step that writes it, and carried only after. Inbound is filed on
+  receipt, byte for byte, and only once it exists at the sender's HEAD
+  (`git -C <sender> log -1 -- <path>`). A finding from another project
+  arrives as a claim; verify it here before building on it.
 
 Don't collapse them. Offer updates proactively at stopping points.
 
@@ -185,10 +239,11 @@ clearly general), and a one-line summary. Then commit, and state the single next
 step so the next session opens with no guessing.
 
 **Required last step, not an open item: re-paste the Instructions field.**
-Output the current, post-commit text of all three files -- this one,
-OPERATOR-PROFILE.md, PROJECT-PROFILE.md -- in full, and state plainly that
-the session is not closed until they're pasted. No tool can do this step;
-it has been skipped across multiple sessions precisely because it felt
-optional when logged as a carryover instead of demanded as the last thing
-the ritual asks for. `bin/scaffold-freshness` cannot see this hop (ADR-007) --
-this step is the only mitigation that exists for it.
+Hand over the command that prints all three files -- this one,
+OPERATOR-PROFILE.md, PROJECT-PROFILE.md -- and their digest, as
+CLOSEOUT-RITUAL.md gives it; never the assistant's own reproduction of their
+text. State plainly that the session is not closed until the output is
+pasted. No tool can do this step: the Instructions field has no API, so
+`bin/scaffold-freshness` cannot see this hop. It has been skipped across
+multiple sessions precisely because it felt optional when logged as a
+carryover instead of demanded as the last thing the ritual asks for.

@@ -18,7 +18,11 @@ git -C "$UPSTREAM_DIR" diff --quiet -- OPERATOR-PROFILE.md || {
 
 SHA="$(git -C "$UPSTREAM_DIR" log -1 --format=%h -- OPERATOR-PROFILE.md)"
 DATE="$(git -C "$UPSTREAM_DIR" log -1 --format=%ad --date=short -- OPERATOR-PROFILE.md)"
-ORIGIN="$(basename -s .git "$(git -C "$UPSTREAM_DIR" remote get-url origin 2>/dev/null || echo upstream)")"
+# No stderr redirect and no fallback name: a stamp reading "copied from
+# upstream" names no source. Fail instead.
+ORIGIN_URL="$(git -C "$UPSTREAM_DIR" remote get-url origin)" || {
+  echo "no origin remote in $UPSTREAM_DIR -- the stamp must name its source" >&2; exit 1; }
+ORIGIN="$(basename -s .git "$ORIGIN_URL")"
 STAMP="**Stamped:** $SHA ($DATE) -- copied from $ORIGIN; see bin/scaffold-freshness"
 
 awk -v stamp="$STAMP" '
