@@ -6,6 +6,61 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.11.0
+
+**Upgrade note: a change to a synced file without a VERSION bump is now
+refused downstream.** `bin/scaffold-update` exits 3 and applies nothing when
+VERSION matches upstream but synced content differs, and
+`bin/scaffold-freshness` reports it. Upstream, a `pre-push` hook refuses the
+push, and a CI workflow reports any push that bypassed the hook.
+*Cost: a synced script changed between two releases with no bump, and no
+downstream project could tell it had moved.*
+
+- `bin/scaffold-freshness`: template ADRs (`*-TEMPLATE.md`) no longer count
+  as decisions, so they no longer make a fresh brief read stale.
+  *Cost: downstream briefs read stale after a sync that touched only a
+  template.*
+- `bin/scaffold-freshness`, `bin/scaffold-brief-check`: run with
+  `GIT_OPTIONAL_LOCKS=0`. Neither takes a lock today; the line keeps a future
+  edit from adding a `git status` that leaves `index.lock` behind where the
+  process cannot remove it.
+  *Cost: a background reader left `index.lock` in three repos, and every
+  later commit in each failed until it was removed by hand.*
+- `PROJECT-INSTRUCTIONS.md`: between two copies of a file, compare content
+  hashes before choosing one.
+  *Cost: a receipt claimed this rule was promoted when it was not; the
+  receiving project found the gap by grepping the method.*
+- `PROJECT-INSTRUCTIONS.md`: new, "A control changes the system; it does not
+  police attention," which also extends the full-space search from fixes to
+  designs.
+  *Cost: a documentation-only fix failed three times before the real control,
+  removing a tool's access, was reached; and a design was chosen from the
+  first shortlist that came to mind.*
+- `PROJECT-INSTRUCTIONS.md`, correspondence: inbound is filed under the
+  sender's filename; the three letter-name forms; copies are matched by
+  content, never by name.
+  *Cost: inbound copies under their own holder's name were compared with
+  themselves and read as filed whatever the sender held.*
+- `PROJECT-INSTRUCTIONS.md`: a receipt quotes each promoted line as it now
+  stands, with its commit.
+  *Cost: as for the content-hash rule above -- a receipt that named a family
+  instead of the line could not be checked by either side.*
+- `CLOSEOUT-RITUAL.md`: a brief points at a generated report and never
+  copies its lists.
+  *Cost: a brief carried a report's letter list, which was stale by the next
+  night.*
+- `CLOSEOUT-RITUAL.md`, step 7: the opening block adds any opening check the
+  operator profile names, and a session that left work in more than one repo
+  states the order of work across all of them, decided.
+  *Cost: the next step was offered as a choice between projects, and the
+  same brief was read two ways in two chats.*
+
+Upstream tooling, not synced: `bin/scaffold-init` creates a project that
+passes every check from its first commit; `bin/scaffold-version-check`, with
+its hook and workflow, enforces the bump; `bin/scaffold-export --check`
+exits 0 up to date, 1 drift or leak, 2 could not look, and a shipped file
+missing from the source is drift.
+
 ## 1.10.0
 
 **Upgrade note: `bin/scaffold-update --check` now exits 1 when files are

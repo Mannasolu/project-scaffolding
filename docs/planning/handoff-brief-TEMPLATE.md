@@ -1,73 +1,63 @@
-# [PROJECT NAME] -- Handoff Brief
+# [PROJECT NAME] -- Handoff brief
 
-> Current state, in a form you can paste into a fresh session to resume with
-> full context. Overwritten, never accumulated.
+> **What this document is:** current state, pasted into a fresh session to
+> resume with full context. Overwritten at every closeout, never accumulated.
+> Replace every bracketed placeholder; `bin/scaffold-brief-check` must exit 0
+> before the brief is committed.
 
-**Last updated:** [YYYY-MM-DD] (revised after session [NNN] closeout)
-**Stamped:** [short-sha] ([YYYY-MM-DD]) -- see `bin/scaffold-freshness`
-**Next up:** [The single next action, stated concretely enough to start cold.]
+**Written:** [YYYY-MM-DD], end of [project] session [NNN]
 
-## Who / What
+**Stamped:** [short-sha] ([YYYY-MM-DD])
 
-[Who's running this project, in one or two lines -- name, location, org, role.]
+## Objective, quoted verbatim from master-plan.md
 
-[What this project is a workshop for -- one or two sentences on purpose and
-output.]
+> **OBJECTIVE:** [the OBJECTIVE paragraph from docs/planning/master-plan.md, copied verbatim]
 
-## The machines / environment
+This brief quotes; it never paraphrases. `bin/scaffold-brief-check` fails the
+brief commit if this paragraph drifts from `docs/planning/master-plan.md`.
 
-- [Machine name] -- [role: primary/secondary]. [OS]. User `[username]`,
-  hostname `[hostname]`. [What's installed, how auth works.]
-- [Any other machine] -- [role]. User `[username]`, `[address]`.
+## Where things stand
 
-> [Any environment quirk worth flagging every time -- naming mismatches,
-> spelling variants, username differences between machines.]
+Read from the repo, not asserted.
 
-## Credentials / repos
+| Repo | Version | State |
+|---|---|---|
+| [repo] | [VERSION] | [last commit and what it holds] |
 
-- Account: `[account or org]` -- state plainly whether this is a personal
-  account or an organization. The two differ in what's even possible.
-- `[repo URL or path]` -- [what it is, visibility, any relevant flags].
-- Local: `[local paths]`
-- [Key or credential registration details -- name only, never the key itself.]
+## What was settled
 
-## Progress map
+- [A decision made this session that should not be reopened without new information.]
 
-| Workstream | Status |
-|---|---|
-| [A workstream tracked for this project] | [Status: Not started / In progress / Complete] |
+## Open
 
-## What's built (detail)
+Item numbers are kept stable across sessions.
 
-[A prose summary of what exists right now -- versions, file sets, what each
-repo or component holds. Enough detail that a fresh session doesn't have to
-re-derive it by reading the tree.]
+1. **[An open item.]** **Waits on:** [what resolves it].
 
-## [A section describing a standing mechanism or process specific to this project]
+## Single next step
 
-[Explain how the mechanism works, if this project has one worth documenting --
-e.g., how changes propagate, how a loop or pipeline runs end to end.]
+[The one next action, concrete enough to start cold.]
 
-## [A section resolving an open question or decision that governs future work]
+## Opening the next chat -- [project] session [NNN+1]
 
-[What was decided, and the reasoning that still governs the build going
-forward. Keep the reasoning even after the decision is made, since it prevents
-relitigating it.]
+**Project:** [project]
+**Session:** [NNN+1]
 
-## What's decided
+**1.** Print the three profiles and their digest:
 
-- [A decision that's settled and shouldn't be revisited without new
-  information.]
+    cd ~/[project] && git pull && cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
 
-## What's open
+**2.** Paste that output into the **Instructions field**, replacing what is
+there.
 
-1. [An open item, ordered by priority or dependency.]
+**3.** Print this brief and a fresh digest:
 
-## Working preferences
+    cd ~/[project] && cat docs/planning/handoff-brief.md && cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1
 
-[Point at the authoritative source -- e.g., OPERATOR-PROFILE.md -- and give the
-short form of the most load-bearing preferences.]
+**4.** Open a new chat in the project. Paste that output as the **first chat
+message**, followed by:
 
-## Immediate next steps
-
-1. [The first concrete action for the next session.]
+    Session [NNN+1]. Before anything else: echo the last line of the
+    Instructions field verbatim -- the instructions-digest line -- and compare
+    it to the digest above. Report both. A mismatch, or a missing digest line,
+    stops the session: the Instructions field is stale.

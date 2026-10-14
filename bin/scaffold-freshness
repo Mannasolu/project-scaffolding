@@ -25,8 +25,21 @@
 #
 # For handoff-brief.md, the stamp is this repo's own commit at the time the
 # brief was written -- checked against the newest commit that touched
-# docs/decisions/ or WORKING-AGREEMENT.md. That check reads history, not a
-# copied file, so the stamp-vs-content defect does not apply to it.
+# docs/decisions/ or WORKING-AGREEMENT.md, excluding docs/decisions/*-TEMPLATE.md
+# (a synced template is method, not a decision; scaffolding item 43). That
+# check reads history, not a copied file, so the stamp-vs-content defect does
+# not apply to it.
+#
+# Synced files (downstream only, docs/specs/version-bump-check.md): upstream
+# VERSION is fetched from main. Newer upstream -> stale, run
+# bin/scaffold-update. Equal VERSION -> every file in bin/scaffold-update's
+# SYNCED list is compared byte for byte with upstream's copy; any difference
+# is stale with two possible causes named (upstream changed without a bump,
+# or this copy was edited locally). Upstream unreachable -> unknown.
+#
+# Pre-push hook (upstream only, export/ present): core.hooksPath must be
+# .githooks and .githooks/pre-push must be executable, or the version-bump
+# gate is not installed and this check fails.
 #
 # Exit codes:
 #   0  fresh    -- every check that could run found its copy up to date
@@ -40,6 +53,7 @@
 #
 # Usage: bin/scaffold-freshness
 set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
 
 OPERATOR_UPSTREAM="${SCAFFOLD_UPSTREAM:-Mannasolu/project-scaffolding}"
 BRANCH="${SCAFFOLD_BRANCH:-main}"
@@ -61,6 +75,24 @@ upstream_profile_at() {
   gh api -H 'Accept: application/vnd.github.raw+json' \
     "repos/${OPERATOR_UPSTREAM}/contents/OPERATOR-PROFILE.md?ref=$1"
 }
+
+# Raw upstream content of any synced path at BRANCH, written to $2. Non-zero
+# on failure; stderr passes through.
+upstream_raw_to() {
+  gh api -H 'Accept: application/vnd.github.raw+json' \
+    "repos/${OPERATOR_UPSTREAM}/contents/$1?ref=${BRANCH}" > "$2"
+}
+
+# The synced list, parsed from the local bin/scaffold-update exactly as
+# bin/scaffold-export parses it. Empty when the array is missing or unreadable.
+local_synced_list() {
+  [ -f bin/scaffold-update ] || return 0
+  sed -n '/^SYNCED=(/,/^)/p' bin/scaffold-update | sed '1d;$d' \
+    | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' || true
+}
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 # Hash of content with the per-copy stamp line removed and blank runs squeezed.
 # Takes content as $1 so local and upstream pass through identical handling.
@@ -122,6 +154,77 @@ else
   fi
 fi
 
+if [ -d export ]; then
+  echo
+  echo "== .githooks/pre-push (upstream only) =="
+  hooks_path="$(git config core.hooksPath || true)"
+  if [ "$hooks_path" != ".githooks" ]; then
+    echo "  FAILED -- core.hooksPath is '${hooks_path:-unset}', not .githooks: the version-bump"
+    echo "  gate (.githooks/pre-push) is not installed. Run: git config core.hooksPath .githooks"
+    mark_stale
+  elif [ ! -x .githooks/pre-push ]; then
+    echo "  FAILED -- .githooks/pre-push is missing or not executable: the version-bump gate"
+    echo "  cannot run. Restore it from git and chmod +x .githooks/pre-push"
+    mark_stale
+  else
+    echo "  installed (core.hooksPath=.githooks, .githooks/pre-push executable)"
+  fi
+else
+  echo
+  echo "== synced files vs. ${OPERATOR_UPSTREAM} =="
+  if ! { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }; then
+    echo "  gh unavailable or unauthenticated -- cannot compare to upstream"
+    mark_unknown
+  elif [ ! -f VERSION ]; then
+    echo "  VERSION not present -- run this from the project root"
+    mark_unknown
+  elif ! upstream_raw_to VERSION "${TMP}/VERSION"; then
+    echo "  could not reach ${OPERATOR_UPSTREAM} to read VERSION"
+    mark_unknown
+  else
+    local_version="$(head -1 VERSION)"
+    upstream_version="$(head -1 "${TMP}/VERSION")"
+    if [ "$local_version" = "$upstream_version" ]; then
+      synced_list="$(local_synced_list)"
+      if [ -z "$synced_list" ]; then
+        echo "  could not read the SYNCED array from bin/scaffold-update -- cannot compare content"
+        mark_unknown
+      else
+        differing=()
+        unreachable=()
+        while IFS= read -r f; do
+          if ! upstream_raw_to "$f" "${TMP}/synced-copy"; then
+            unreachable+=("$f")
+          elif [ ! -f "$f" ] || ! cmp -s "$f" "${TMP}/synced-copy"; then
+            differing+=("$f")
+          fi
+        done <<< "$synced_list"
+        if [ "${#differing[@]}" -gt 0 ]; then
+          echo "  STALE -- VERSION ${local_version} matches upstream, but these synced files differ:"
+          printf '    %s\n' "${differing[@]}"
+          echo "  Two possible causes: upstream changed without a VERSION bump (scaffolding item 33),"
+          echo "  or this copy was edited locally. Inspect one with:"
+          echo "    diff <(gh api -H 'Accept: application/vnd.github.raw+json' 'repos/${OPERATOR_UPSTREAM}/contents/<path>?ref=${BRANCH}') <path>"
+          mark_stale
+        fi
+        if [ "${#unreachable[@]}" -gt 0 ]; then
+          echo "  could not fetch from ${OPERATOR_UPSTREAM}: ${unreachable[*]}"
+          mark_unknown
+        fi
+        if [ "${#differing[@]}" -eq 0 ] && [ "${#unreachable[@]}" -eq 0 ]; then
+          echo "  up to date (VERSION ${local_version}; $(printf '%s\n' "$synced_list" | wc -l) synced files identical to upstream)"
+        fi
+      fi
+    elif [ "$(printf '%s\n%s\n' "$local_version" "$upstream_version" | sort -V | tail -1)" = "$upstream_version" ]; then
+      echo "  STALE -- upstream is ${upstream_version}, this project is ${local_version}. Run: bin/scaffold-update"
+      mark_stale
+    else
+      echo "  this project reads ${local_version}, ahead of upstream ${upstream_version} -- unexpected; inspect VERSION"
+      mark_unknown
+    fi
+  fi
+fi
+
 echo
 echo "== docs/planning/handoff-brief.md vs. this repo's own decisions =="
 if [ ! -f docs/planning/handoff-brief.md ]; then
@@ -132,7 +235,9 @@ elif ! git rev-parse --git-dir >/dev/null 2>&1; then
   mark_unknown
 else
   brief_stamp="$(stamp_of docs/planning/handoff-brief.md)"
-  newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md 2>/dev/null || true)"
+  # docs/decisions/*-TEMPLATE.md is synced method, not a decision: a method
+  # sync must not read as a stale brief (scaffolding item 43).
+  newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md ':(exclude)docs/decisions/*-TEMPLATE.md' 2>/dev/null || true)"
   if [ -z "$brief_stamp" ]; then
     echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
     mark_unknown

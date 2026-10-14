@@ -24,7 +24,9 @@ should offer it proactively in the second case -- not wait to be asked.
 ## The four things produced
 
 1. **Updated handoff brief** -- rewrite only what changed; say plainly when
-   something didn't.
+   something didn't. A brief points at a generated report and never copies
+   its lists: the report is rewritten on its own schedule, and a copy goes
+   stale at its next run while still reading as current.
 2. **Session log additions** for the layer or workstream worked on.
 3. **Working-agreement entries** -- any correction about *how the work goes* that
    came up this session. If one has recurred or is clearly general, promote it
@@ -106,8 +108,18 @@ several specific corrections usually collapse into one general principle.
    handoff brief:** the single next step, the command that prints the three
    profiles and their digest, the command that prints the brief with a fresh
    digest, and the first message to paste, including the digest comparison.
-   The next session opens from that block with no guessing. A start-of-session
-   step belongs at the end of the document the closeout already writes.
+   Add any opening check the operator profile names. The next session opens
+   from that block with no guessing. A start-of-session step belongs at the
+   end of the document the closeout already writes.
+
+   **When the session left work in more than one repo, the brief also states
+   the order of work across all of them** -- decided, with its reason, never
+   offered as a choice. The operator cannot weigh one project against
+   another from inside one of them. A project created during the session gets
+   its own closeout first: its brief brought current and its opening block
+   written. *Cost: a closeout named its own next session, then added that
+   another project would serve the objective better; the same brief was read
+   two ways in two chats.*
 8. **Last: re-paste the Instructions field.** Required, not an open item --
    see below. This is deliberately the final step in this list so it cannot
    be buried under whatever comes after it.

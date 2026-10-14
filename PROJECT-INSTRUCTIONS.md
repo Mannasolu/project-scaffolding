@@ -44,7 +44,10 @@
   false verification that looks identical to a true one. An agent's or a tool's
   *report* of a check is the same failure at one remove: a summary can truncate,
   paraphrase, or elide the very difference being checked for. Verification
-  output is read from the artifact itself.
+  output is read from the artifact itself. Between two copies of a file,
+  compare content hashes before choosing one: identical content makes the
+  choice trivial, and differing content makes a choice by name or timestamp
+  a silent loss of the newer edits.
 - Verify current info by search before advising on software versions or tools.
 - Notice structural gaps unprompted and say so.
 - **Check known open items against the current task.** Open items in the
@@ -90,6 +93,18 @@ on its first run gets mutation-checked; a test that expects a refusal gets a
 positive control. A stub's output is copied from the real tool, never written
 from the same assumption as the code under test. A live test runs against the
 version the target actually runs.
+
+**A control changes the system; it does not police attention.** When an error
+is found, the fix makes it impossible or loud -- a check that fails, a gate
+that refuses, a permission removed -- not a sentence asking someone to be
+more careful, which works only if it is recalled at the moment it is needed.
+Search the whole space of controls before settling, including ones the
+person proposing the fix cannot apply alone; the cheapest control is not
+preferred because it is the cheapest. The same holds for designs: the
+choice is made from the full space, not from the shortlist that came to
+mind first. When a slip is a person's, name the symptom, hand back the
+corrected step, and assign no cause -- neither blame nor absolution changes
+the mechanism; a control does.
 
 **Read what governs a document before writing or ruling under it.** The
 template before a spec, the cited ADRs before a governance file, the prior
@@ -149,9 +164,14 @@ never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
   cost accepted.
 - `correspondence/` -- letters between projects. Outbound is committed in
   the same step that writes it, and carried only after. Inbound is filed on
-  receipt, byte for byte, and only once it exists at the sender's HEAD
-  (`git -C <sender> log -1 -- <path>`). A finding from another project
-  arrives as a claim; verify it here before building on it.
+  receipt, byte for byte, under the sender's filename, and only once it
+  exists at the sender's HEAD (`git -C <sender> log -1 -- <path>`). A
+  letter is named `[YYYY-MM-DD-]to-<repo>.md`, `reply-to-<repo>.md`, or
+  `from-<repo>.md`: the direction word comes first after the date, and
+  names the other repo from the sender's point of view. Copies are matched
+  by content, never by name, so a filed copy is never edited; a correction
+  is a new letter. A finding from another project arrives as a claim;
+  verify it here before building on it.
 
 Don't collapse them. Offer updates proactively at stopping points.
 
@@ -220,6 +240,12 @@ durable thing from the narrative and put it where it's found again.
 Tier 3 is deliberately manual. Deciding that a rule is universal rather than
 merely habitual is a judgment, and the ritual's own principle applies: the
 thinking half doesn't automate.
+
+**A receipt quotes each promoted line as it now stands, with its commit.**
+When a project is told its rule was promoted, the receipt carries the line
+itself, not the name of the family it joined. A receipt that names a family
+cannot be checked by its reader before the row is closed, nor by its writer
+before it is sent.
 
 ## What good scaffolding looks like
 

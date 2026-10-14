@@ -48,6 +48,7 @@
 #
 # Usage: bin/scaffold-brief-check
 set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
 
 BRIEF="${SCAFFOLD_BRIEF:-docs/planning/handoff-brief.md}"
 IGNORE="${SCAFFOLD_BRIEF_IGNORE:-.briefcheckignore}"

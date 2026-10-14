@@ -20,7 +20,11 @@
 # delete), 2 could not determine -- upstream unreachable, or any single file
 # could not be fetched. A full run that cannot fetch every file applies
 # nothing and exits 2: SYNCED is upstream's own list, so a missing file is a
-# fault, not a normal case. Other errors keep their exit codes.
+# fault, not a normal case. 3, in both modes: remote VERSION equals local
+# VERSION yet a synced file differs -- upstream changed without a bump, or
+# this copy was edited locally -- and nothing is applied until that is
+# resolved (docs/specs/version-bump-check.md). Other errors keep their exit
+# codes.
 set -euo pipefail
 
 # The arguments as given, kept for the self-update re-exec at the end.
@@ -211,6 +215,23 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
     echo "applying nothing." >&2
   fi
   exit 2
+fi
+
+# Equal VERSION with differing synced content is a fault, not an update. The
+# bump is what tells every downstream that something changed; without it, this
+# script cannot tell "upstream moved" from "this copy was edited" and must not
+# overwrite either way. Upstream's own gate (bin/scaffold-version-check) is
+# meant to make the first cause impossible; this is the refusal downstream if
+# it ever gets through.
+if [ "${#CHANGED[@]}" -gt 0 ] && [ "$(head -1 VERSION)" = "$(head -1 "${TMP}/VERSION")" ]; then
+  echo >&2
+  echo "VERSION $(head -1 VERSION) matches upstream, but ${#CHANGED[@]} synced file(s) differ:" >&2
+  printf '  %s\n' "${CHANGED[@]}" >&2
+  echo "Two possible causes: upstream changed without a VERSION bump (scaffolding" >&2
+  echo "item 33), or this copy was edited locally. Applying nothing. Inspect each" >&2
+  echo "path with: diff <(gh api -H 'Accept: application/vnd.github.raw' 'repos/${UPSTREAM}/contents/<path>?ref=${BRANCH}') <path>" >&2
+  echo "then either restore the local copy or get upstream to bump VERSION." >&2
+  exit 3
 fi
 
 if [ "$TOTAL" -eq 0 ]; then
