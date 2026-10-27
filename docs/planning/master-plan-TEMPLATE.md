@@ -5,9 +5,7 @@
 > v3 -- you don't patch it, and you don't rename the file. Delete these prompt
 > lines as you fill each section.
 
-**OBJECTIVE:** [one sentence: what this project is for, and what "done" looks
-like. Everything below this line is means. The handoff brief quotes this line
-verbatim, and `bin/scaffold-brief-check` checks the quote.]
+**OBJECTIVE:** [one sentence: what this project is for, and what "done" looks like. Everything below this line is means. The handoff brief quotes this line verbatim, and `bin/scaffold-brief-check` checks the quote.] <!-- required -->
 
 ## 1. Scope
 > One paragraph: what is being built, and what is explicitly NOT in scope.
@@ -33,7 +31,7 @@ verbatim, and `bin/scaffold-brief-check` checks the quote.]
 ## 7. Business / outcome model
 > How it sustains itself, or what success looks like if it isn't a business.
 
-## 8. Open questions queue
+## 8. Open questions queue <!-- required -->
 > The live list. Each entry ends with a **Waits on:** line. Move items out as
 > they close. This is never empty on a real project -- if it looks empty,
 > you're not looking hard enough.

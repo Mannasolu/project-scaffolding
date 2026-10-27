@@ -5,11 +5,11 @@
 > Replace every bracketed placeholder; `bin/scaffold-brief-check` must exit 0
 > before the brief is committed.
 
-**Written:** [YYYY-MM-DD], end of [project] session [NNN]
+**Written:** [YYYY-MM-DD], end of [project] session [NNN] <!-- required -->
 
-**Stamped:** [short-sha] ([YYYY-MM-DD])
+**Stamped:** [short-sha] ([YYYY-MM-DD]) <!-- required -->
 
-## Objective, quoted verbatim from master-plan.md
+## Objective, quoted verbatim from master-plan.md <!-- required -->
 
 > **OBJECTIVE:** [the OBJECTIVE paragraph from docs/planning/master-plan.md, copied verbatim]
 
@@ -28,24 +28,24 @@ Read from the repo, not asserted.
 
 - [A decision made this session that should not be reopened without new information.]
 
-## Open
+## Open <!-- required -->
 
 Item numbers are kept stable across sessions.
 
 1. **[An open item.]** **Waits on:** [what resolves it].
 
-## Single next step
+## Single next step <!-- required -->
 
 [The one next action, concrete enough to start cold.]
 
-## Opening the next chat -- [project] session [NNN+1]
+## Opening the next chat -- [project] session [NNN+1] <!-- required -->
 
 **Project:** [project]
 **Session:** [NNN+1]
 
 **1.** Print the three profiles and their digest:
 
-    cd ~/[project] && git pull && cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
+    cd ~/[project] && { timeout 120 git pull || { echo "pull exit: $? (124 is a timeout) -- stopped"; false; }; } && cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
 
 **2.** Paste that output into the **Instructions field**, replacing what is
 there.

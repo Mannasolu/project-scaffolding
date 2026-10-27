@@ -21,6 +21,12 @@
   no commentary, no menus -- if two paths exist, pick the durable one and give
   that) vs. DECIDING/LEARNING (trade-offs, why a thing exists, what the
   alternatives were -- options belong here and only here).
+- **A handed-over command that waits says so.** One that waits for input says
+  how to leave it, and a non-interactive form comes first. A step that waits
+  on the network is bounded, and a timeout prints as a failure. A bound covers
+  what a step waits on: a command that starts or waits for a service doing
+  network I/O is a network step and gets its own bound, even when the network
+  call is inside the service.
 - **The correction word is "decide."** When it's said, the previous turn offered
   a choice that should have been made. Make it and continue -- no apology, no
   recap.
@@ -47,7 +53,13 @@
   output is read from the artifact itself. Between two copies of a file,
   compare content hashes before choosing one: identical content makes the
   choice trivial, and differing content makes a choice by name or timestamp
-  a silent loss of the newer edits.
+  a silent loss of the newer edits. A completed transfer is confirmed by
+  content hashes of source and destination, compared as sets of distinct
+  contents. A sender's count, a receiver's count, sizes and filenames are
+  claims about the transfer, not evidence of it.
+- **A tool's report that it wrote a file is a claim.** The write is confirmed
+  by reading the file's hash on the target, every time, before anything
+  depends on it.
 - Verify current info by search before advising on software versions or tools.
 - Notice structural gaps unprompted and say so.
 - **Check known open items against the current task.** Open items in the
@@ -73,7 +85,13 @@ reads as a whole one. Prove the delivery path end to end on a schedule, with a
 check that does not travel the path it is checking. Give every alert an owner
 and a record of acknowledgement. An alert that repeats unacknowledged must
 escalate -- into a channel with demonstrated attention, such as the
-session-opening check -- rather than repeat.
+session-opening check -- rather than repeat. A report's age bounds what it
+can say: a check that gates on a periodic report pairs it, at the moment it
+gates, with a fresh read of whatever changed since the report ran. An
+acknowledgement names the event it covers, by an identifier the event itself
+carries, and expires with that event and within one window of it; one keyed
+to a source, a unit or a time window also covers the next failure from the
+same place.
 
 **A check reports what it observed.** Its exit code agrees with its text: a
 check that prints a failure and exits 0 cannot gate anything, and its readers
@@ -83,16 +101,25 @@ acknowledged; a check that reads only current state cannot see a failure that a
 later success overwrote. Liveness is the observable output, not a precondition
 that was met. Output whose failure mode has not been seen is never suppressed:
 discarding stderr on an untested path destroys the only evidence separating
-"found nothing" from "never ran."
+"found nothing" from "never ran." A check reads the status of the command it
+checks, never a pipeline's last. A freshness check bounds age on both sides:
+a time too old fails, and so does one too far in the future, because a
+future time reads as fresh for as long as it stays ahead.
 
 **A test proves it can fail, and proves what it exercised.** Run a new test or
 control first against a synthetic reproduction of the failure it exists to
 catch. Assert that the targeted path ran, not only the outcome -- a test of a
 failure path can pass through the recovery path instead. A suite that is green
 on its first run gets mutation-checked; a test that expects a refusal gets a
-positive control. A stub's output is copied from the real tool, never written
-from the same assumption as the code under test. A live test runs against the
-version the target actually runs.
+positive control. A stub's output is copied from the real tool, in the exact
+form the code runs it -- the same flags, and input delivered the same way --
+never written from the same assumption as the code under test. A live test
+runs against the version the target actually runs. A test's expectation is
+written from the mechanism, read first, and a proof run is done only when
+each case fails for the reason it names. A negative assertion is proven able
+to fire: a helper that reports "absent" may be reporting that it never
+looked, so it gets a positive control whose input is built to make it fire,
+sized past any buffer it reads through.
 
 **A control changes the system; it does not police attention.** When an error
 is found, the fix makes it impossible or loud -- a check that fails, a gate
@@ -104,15 +131,25 @@ preferred because it is the cheapest. The same holds for designs: the
 choice is made from the full space, not from the shortlist that came to
 mind first. When a slip is a person's, name the symptom, hand back the
 corrected step, and assign no cause -- neither blame nor absolution changes
-the mechanism; a control does.
+the mechanism; a control does. A prohibition in an agent's prompt is not a
+control; the deny rule behind it is. A restriction on an agent is proven by
+running a real agent and reading its transcript, with positive controls; a
+text-matching deny rule is not a boundary.
 
 **Read what governs a document before writing or ruling under it.** The
 template before a spec, the cited ADRs before a governance file, the prior
 ruling before a new one. A spec is checked before it is issued: each
-acceptance condition against the project's standing rules, each step for
-whether it can run from the executor's state, branch, and privilege. The
+acceptance condition against the project's standing rules, every machine
+format the spec itself defines against the delimiter rule below, each step
+for whether it can run from the executor's state, branch, and privilege; then
+`bin/scaffold-doc-check docs/specs/<name>.md` exits 0. A spec for a procedure
+that changes a running system or cannot be undone -- a deploy, a migration, a
+restore -- is reviewed before issue by an agent that did not write it,
+against the files that govern it; the bar is set by risk, not by size. The
 executor's first act is to run every command the spec names, on every target
--- a spec's commands are its author's claims about the system.
+-- a spec's commands are its author's claims about the system -- and a step
+that acts on files "by kind" is resolved to paths from `git ls-files` before
+it runs.
 
 **Machine output is read in machine form.** Use a tool's NUL-separated or
 delimited output where it has one. Fields that can be empty are split on a
@@ -151,6 +188,18 @@ PROJECT-INSTRUCTIONS.md, CLOSEOUT-RITUAL.md, and SECURITY-POSTURE.md
 (upstream-owned, synced), OPERATOR-PROFILE.md and PROJECT-PROFILE.md (yours,
 never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
 
+**Templates under `docs/` -- upstream-owned, synced, at the same path in
+every project:** `docs/planning/handoff-brief-TEMPLATE.md`,
+`docs/planning/master-plan-TEMPLATE.md`,
+`docs/planning/WORKING-AGREEMENT-TEMPLATE.md`,
+`docs/specs/component-spec-TEMPLATE.md`, `docs/decisions/adr-TEMPLATE.md`,
+`docs/session-logs/session-log-000-TEMPLATE.md`. A template that sets a
+document's form reaches every project a check holds to that form; otherwise
+the check fails projects for a form they never received. In the three
+planning templates, each line a filled document must carry ends with
+`<!-- required -->`, and `bin/scaffold-doc-check` reads the required set
+from there; a spec or an ADR is held to its template's fields and sections.
+
 **docs/ -- what you're building** (rewritten per project):
 - `planning/master-plan.md` -- what and why. Rewritten as v2, v3 when the
   definition changes; never patched with addenda.
@@ -166,12 +215,15 @@ never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
   the same step that writes it, and carried only after. Inbound is filed on
   receipt, byte for byte, under the sender's filename, and only once it
   exists at the sender's HEAD (`git -C <sender> log -1 -- <path>`). A
-  letter is named `[YYYY-MM-DD-]to-<repo>.md`, `reply-to-<repo>.md`, or
-  `from-<repo>.md`: the direction word comes first after the date, and
-  names the other repo from the sender's point of view. Copies are matched
-  by content, never by name, so a filed copy is never edited; a correction
-  is a new letter. A finding from another project arrives as a claim;
-  verify it here before building on it.
+  letter is named `<YYYY-MM-DD>T<HHMMSS>-<from>--to--<to>.md`: the local
+  time it was generated, then the sender's and the recipient's full repo
+  names. Every letter carries a **Generated:** line with the full time and
+  its offset. A reply is a letter whose **Answers:** line names the letter
+  it answers. Letters sent under an earlier form keep their names. Filing
+  never overwrites: two letters sharing a basename with different content
+  is a finding. Copies are matched by content, never by name, so a filed
+  copy is never edited; a correction is a new letter. A finding from
+  another project arrives as a claim; verify it here before building on it.
 
 Don't collapse them. Offer updates proactively at stopping points.
 
@@ -261,8 +313,9 @@ offer it proactively in the second case.
 
 Four things produced: updated handoff brief, session log additions,
 working-agreement entries (promoted into this file when they recur or are
-clearly general), and a one-line summary. Then commit, and state the single next
-step so the next session opens with no guessing.
+clearly general), and a one-line summary. Then commit, behind
+`bin/scaffold-doc-check` and `bin/scaffold-brief-check`, and state the single
+next step so the next session opens with no guessing.
 
 **Required last step, not an open item: re-paste the Instructions field.**
 Hand over the command that prints all three files -- this one,

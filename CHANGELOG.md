@@ -6,6 +6,168 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.12.0
+
+**Upgrade note: after this sync, the next closeout's checks report every
+required line your planning documents lack.** The three templates now sit
+in `docs/planning/`. Open each beside its filled document, add the lines
+marked `<!-- required -->`, and add a `## Session <NNN> -- <date>`
+section to `WORKING-AGREEMENT.md` for the closing session.
+
+**Upgrade note: the closeout gains a check, and the opening block changes.**
+`bin/scaffold-doc-check` (new, synced) must exit 0 before the closeout's
+first commit, and `bin/scaffold-brief-check` before the second; the commit
+pattern in `CLOSEOUT-RITUAL.md` chains each. Rewrite your brief's "Opening
+the next chat" block from `docs/planning/handoff-brief-TEMPLATE.md`: step
+1's pull is bounded and prints a failure instead of printing profiles from
+a stale tree, and the command that prints the brief starts the sweep under
+a bound and joins the reader with `;`, so the reader's exit is its own.
+Letters take the name form `<YYYY-MM-DD>T<HHMMSS>-<from>--to--<to>.md`
+with a **Generated:** line; letters already sent keep their names.
+
+- `bin/scaffold-freshness`: a `git log` or `git merge-base` failure in the
+  decision-history block reads as UNKNOWN, with git's exit code and stderr
+  printed, never as "no decisions" or as STALE. `tests/test-freshness`
+  proves both paths with a mutant each.
+  *Cost: both calls ran under `2>/dev/null || true`, so a broken repo read
+  as a brief that was up to date.* Every other suppression in the script
+  was read and kept, each on a failure mode that is handled: an absent
+  stamp, an empty sync list, `gh` not installed or not authenticated, an
+  unset `core.hooksPath`, not a git repository. One is carried as an open
+  item: the `gh api` read of upstream still discards stderr, so a 404, an
+  auth error and a network error print the same line.
+- `bin/scaffold-brief-check`: a fourth block requires `WORKING-AGREEMENT.md`
+  to hold a `## Session <NNN>` section for the session on the brief's
+  `**Written:**` line. `bin/scaffold-init` writes `Session 000`. The suite
+  first checks that the script is executable, and fails naming it if not.
+  *Cost: a session's working-agreement section is the evidence the harvest
+  was done, and nothing checked it was written. The execute bit: a write
+  over a desktop link dropped it, every case then exited 126, and the
+  mutation run stayed green.*
+- `bin/scaffold-doc-check`, new and synced: three gates over a repo's
+  living documents, exit 0 sound, 1 defect, 2 could not run, a defect
+  winning over could-not-run. The header gate holds a new document, and a
+  spec revised after the tool arrived, to its template's fields and
+  sections, read from the template, with the tool's own commit as the
+  cutoff and an ADR gated only when new. The reference check resolves every
+  repo-relative path a living document names; a path legitimately absent is
+  waived in `.briefcheckignore`, one per line with a comment. The
+  required-line gate reads the `<!-- required -->` markers from the three
+  planning templates and fails on each line a filled document lacks. Git
+  path lists are read with `-z`, so a name with a space, a non-ASCII name
+  and a staged rename are all gated. Downstream, a synced copy of the
+  method is listed as resolving upstream, not scanned; lines inside fenced
+  blocks are never fields or headings. It runs at closeout before the
+  first commit, before a spec is issued, and in `bin/scaffold-init`.
+  *Cost: a spec's header drifted from its template with nothing comparing
+  them; a path dangled in a document other than the brief and nobody
+  looked; and, mid-build, the check as first written would have failed
+  every downstream closeout, because every copy of the method cites tools
+  that exist only upstream.*
+- `docs/planning/handoff-brief-TEMPLATE.md`: the opening block's step 1
+  bounds its pull with `timeout 120` and prints `pull exit:` and stops on
+  failure. *Cost: a pull hung for twelve minutes inside an opening command
+  and nothing ended it. Cost accepted: a pull slower than the bound stops
+  the opening, and the step is re-run.*
+- `PROJECT-INSTRUCTIONS.md`, promotions, each a line in an existing family:
+  - a handed-over command that waits says so; a network step is bounded,
+    and a bound covers what a step waits on, a started service included.
+    *Cost: the twelve-minute pull above; a sweep started synchronously with
+    no bound of its own.*
+  - a completed transfer is confirmed by content hashes compared as sets of
+    distinct contents; a tool's report that it wrote a file is a claim,
+    confirmed by the file's hash on the target. *Cost: an uploader said
+    160, the server showed 154, and only hashes settled it; a write tool
+    reported success and delivered stale bytes, five times in one session.*
+  - a report's age bounds what it can say; an acknowledgement names its
+    event and expires with it. *Cost: a day-old sweep missed three letters
+    a fresh read found; an acknowledgement keyed to a unit would have
+    hidden the next failure from the same place.*
+  - a check reads the status of the command it checks, never a pipeline's
+    last; a freshness check bounds age on both sides. *Cost: a `&&` chain
+    printed an earlier command's exit under a check's label; a future
+    timestamp read as fresh in two readers in two repos.*
+  - a stub is copied in the exact form the code runs the tool; a test's
+    expectation is written from the mechanism; a negative assertion is
+    proven able to fire. *Cost: a tool formats errors differently on bare
+    stdin and on `-f -`; a suite helper reported "absent" on output it never
+    finished reading, thirty times in thirty.*
+  - a prohibition in an agent's prompt is not a control; a restriction is
+    proven by a real agent run with positive controls. *Cost: an agent
+    obeyed a prompt until it did not; only a deny rule and a transcript
+    proved the boundary.*
+  - under "Read what governs": every machine format a spec defines is
+    checked against the delimiter rule; `bin/scaffold-doc-check` runs
+    before a spec is issued; a spec for a procedure that changes a running
+    system or cannot be undone gets a cold review by an agent that did not
+    write it; a step that acts on files "by kind" is resolved to paths from
+    `git ls-files` first. *Cost: a spec defined a TSV whose empty field
+    collapsed under whitespace splitting; a self-checked production spec
+    passed and a reviewer then found nine defects; a "remove by kind" step
+    took a path a README named and the tree did not.*
+  - "The document set" names the six synced templates by path, states that
+    a template reaches every project a check holds to its form, and takes
+    the letter-name form above. *Cost: four projects were failed for a form
+    they never received; two letters shared a name with different content.*
+- `CLOSEOUT-RITUAL.md`: step 5 runs `bin/scaffold-doc-check` before the
+  first commit; step 7's order of work is a decision with its reasons, each
+  entry naming what that session does and why it holds its position.
+  *Cost: as for the doc-check entry; an order offered without reasons was
+  re-argued in the next chat.*
+- `SECURITY-POSTURE.md`: a reader that runs unattended runs under its own
+  least-privilege credential and reports its expiry before it fails, with
+  its scope read from the reader's code, never from a description of it.
+  *Cost: a scope was drafted from a letter that named two permissions, and
+  the reader's code made a third call.*
+- `docs/planning/handoff-brief-TEMPLATE.md`, `docs/planning/master-plan-TEMPLATE.md`,
+  `docs/planning/WORKING-AGREEMENT-TEMPLATE.md`: the three planning templates
+  are synced, at the same path in every project. Each line a filled document
+  must carry ends with `<!-- required -->`, which renders as nothing: the
+  brief's `**Written:**`, `**Stamped:**`, Objective, Open, Single next step
+  and Opening headings; the master plan's `**OBJECTIVE:**` and open questions
+  queue; the working agreement's `## Session <NNN> -- <date>` section, which
+  the template now carries as its last section. Everything unmarked is
+  guidance, free to keep, change or drop.
+  *Cost: the templates were copied once, by `bin/scaffold-init`, and never
+  again. Four projects predate that tool and never received them, and the
+  checks of v1.9.0 and this release enforce a stamp line, a `**Written:**`
+  line and a session heading those projects were never shown. Their briefs
+  carry `**Last updated:**` instead, and the session check could not read a
+  session number from any of them.*
+- `bin/scaffold-update`: `SYNCED` gains the three paths, and a
+  `docs/planning/*-TEMPLATE.md` is no longer protected. The filled
+  `docs/planning/*.md` and the root `WORKING-AGREEMENT.md` stay protected, and
+  the script still refuses to run if either is ever listed.
+  *Cost: `docs/planning/*` was protected outright, so a synced template there
+  was unrepresentable, and the templates lived only in the upstream repo's
+  `export/`.*
+
+Upstream tooling, not synced: `bin/scaffold-init` reads the three templates
+from `docs/planning/`, strips the markers as it fills, and removes the
+template's placeholder session section so a new project carries one
+`## Session` section, for 000; its step 8 runs the doc-check beside the
+brief check, so a project is sound at birth; the opening it writes joins
+the sweep and the reader to the brief command with `;`, starts the sweep
+under `timeout 300`, and says a non-zero start exit stops the session,
+with its suite replaying a real `gh` 404 captured from the tool.
+`bin/scaffold-export` ships the planning templates through `SYNCED` at
+`docs/planning/`, so the public export's working-agreement template moves
+from its root to `docs/planning/`. `bin/scaffold-docset-check`, new, refuses
+a push to `main` in which the method's document set and the sync list
+disagree: every name the method declares is tracked and synced or
+protected, every synced root document is declared, every tracked template
+under `docs/` is synced; a misspelled template name is a finding, not a
+silent drop. `.githooks/pre-push` and the workflow run it beside the
+version check, both always, each printing its own refusal, and an exit of
+2 refuses too. A push to `main` of any commit that lacks the check is
+refused, so a hotfix cut from history before this release must carry it.
+*Cost: the method named a file as synced that nothing fetched, and every
+downstream copy of the instructions declared a document no project
+received.* Every test suite's negative assertion now reads through a
+here-string, with a 128 KB positive control that fails against the old
+helper. *Cost: `printf | grep -q` under `pipefail` let a forbidden string
+pass whenever the output outran the pipe.*
+
 ## 1.11.0
 
 **Upgrade note: a change to a synced file without a VERSION bump is now

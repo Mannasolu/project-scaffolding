@@ -75,3 +75,12 @@ was promoted.]
 >   done.
 > - **Closeout before the session gets long.** Most drift shows up late. Closing
 >   out earlier is a fix, not just hygiene.
+
+---
+
+> Each closeout appends one section below for its own session (CLOSEOUT-RITUAL.md
+> step 3), and `bin/scaffold-brief-check` looks for the brief's session here.
+
+## Session [NNN] -- [YYYY-MM-DD] <!-- required -->
+
+- [What this session changed in how we work, or "nothing to log".]

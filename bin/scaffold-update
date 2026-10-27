@@ -5,7 +5,8 @@
 # planning documents, and your working agreement are never overwritten -- that
 # separation is the whole reason the sync can be a plain overwrite instead of a
 # merge, since a template repo shares no git history with the projects made
-# from it.
+# from it. The blanked *-TEMPLATE.md files beside your planning documents are
+# upstream's and are synced; the filled documents next to them are yours.
 #
 # Fetches through `gh api`, which uses your existing GitHub auth and therefore
 # works whether the upstream repo is private or public. Falls back to anonymous
@@ -42,9 +43,13 @@ SYNCED=(
   bin/scaffold-update
   bin/scaffold-freshness
   bin/scaffold-brief-check
+  bin/scaffold-doc-check
   docs/specs/component-spec-TEMPLATE.md
   docs/decisions/adr-TEMPLATE.md
   docs/session-logs/session-log-000-TEMPLATE.md
+  docs/planning/handoff-brief-TEMPLATE.md
+  docs/planning/master-plan-TEMPLATE.md
+  docs/planning/WORKING-AGREEMENT-TEMPLATE.md
 )
 
 # Formerly upstream-owned files upstream has since dropped. A plain fetch
@@ -60,10 +65,12 @@ RETIRED=(
 # Files no downstream project may ever have touched by this script, synced
 # or retired: operator- and project-owned governance (ADR-004's partition),
 # this repo's own planning/decision/log history, and (in the upstream repo
-# itself) its private export tooling. Checked against SYNCED and RETIRED at
-# every run, not just trusted at authoring time -- a bad edit to either
-# array above must fail loudly here rather than silently deleting or
-# overwriting something it was never allowed to touch.
+# itself) its private export tooling. In docs/planning/, docs/session-logs/
+# and docs/decisions/ a *-TEMPLATE.md is the method's blank and is not
+# protected; everything else there is this project's. Checked against
+# SYNCED and RETIRED at every run, not just trusted at authoring time -- a
+# bad edit to either array above must fail loudly here rather than silently
+# deleting or overwriting something it was never allowed to touch.
 #
 # Naming note: this returns true for files that are NOT upstream-owned.
 # Renaming it is_upstream_owned() would invert the meaning of every call
@@ -71,7 +78,7 @@ RETIRED=(
 is_protected() {
   case "$1" in
     WORKING-AGREEMENT.md|OPERATOR-PROFILE.md|PROJECT-PROFILE.md) return 0 ;;
-    docs/planning/*) return 0 ;;
+    docs/planning/*) [[ "$1" == *-TEMPLATE.md ]] && return 1 || return 0 ;;
     docs/session-logs/*) [[ "$1" == *-TEMPLATE.md ]] && return 1 || return 0 ;;
     docs/decisions/*) [[ "$1" == *-TEMPLATE.md ]] && return 1 || return 0 ;;
     export/*) return 0 ;;

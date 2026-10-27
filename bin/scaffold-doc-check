@@ -1,0 +1,690 @@
+#!/usr/bin/env bash
+# Check this repo's living documents against what the method says they carry.
+# Three checks, each printed as its own block:
+#
+#   1. Headers        -- a spec (docs/specs/) or ADR (docs/decisions/) carries
+#                        every field and section of its template, each field
+#                        filled, the Status one the template allows, the
+#                        sections in the template's order.
+#   2. References     -- every repo-relative path a living document names is
+#                        tracked, or waived in .briefcheckignore.
+#   3. Required lines -- the handoff brief, master plan and working agreement
+#                        carry every line their templates mark
+#                        `<!-- required -->`, filled in.
+#
+# Why (1): "a spec is checked before it is issued", and three sessions running
+# the defect in a spec was found by the executor's first act. The fields and
+# sections are the part of that check a tool can do. They are read from the
+# templates, never copied here, so a template change is the only edit needed.
+#
+# Why (2): bin/scaffold-brief-check proves the brief's paths resolve. A rename
+# can leave a dangling path in any other living document, and nothing looked.
+#
+# Why (3): the planning templates mark the lines a filled document must carry,
+# and the v1.12.0 upgrade note promises that the next closeout reports every
+# one a project lacks. This block is that promise. The required set is read
+# from the markers; this script carries no list of required lines.
+#
+# Spec: docs/specs/scaffold-doc-check.md. The reference extraction is
+# bin/scaffold-brief-check's, copied not imported, and tests/test-doc-check
+# case 13 proves the two agree.
+#
+# Deliberately dumb, like brief-check: it does not guess whether an absence is
+# intentional. A path that is legitimately absent is waived by hand in
+# .briefcheckignore, one path per line, so every waiver is a decision somebody
+# wrote down. It judges form, not content.
+#
+# Known limit: a path that belongs to another repo (after `cd ~/other && ...`)
+# is checked against this one. Same-named files will resolve falsely.
+#
+# Synced copies (spec 4.2, amendment 2): downstream -- a repo with no export/
+# directory, the test bin/scaffold-freshness uses -- every file in
+# bin/scaffold-update's SYNCED array is an upstream-owned copy, and its paths
+# resolve upstream as a letter's resolve in the sender's repo. They are not
+# scanned there; they are listed once, with a count. Cost accepted: a synced
+# copy's genuinely dangling path is found only upstream, where the copy is
+# written. If SYNCED cannot be read downstream, that is could-not-run and
+# every file is scanned.
+#
+# Fences (spec 4.1, amendment 3): a line inside a fenced code block -- opened
+# and closed by a line starting with three backticks or three tildes -- is
+# never a field line or a section line, in a template or in a document, for
+# the header gate and the required-line gate. A spec that quotes a template in
+# a fence is quoting it, not declaring it. The reference check still scans
+# fences: a command's path is a real reference, and brief-check scans them too.
+#
+# The carried profile (spec 4.2, amendment 3): downstream, OPERATOR-PROFILE.md
+# is carried from upstream and stamped, so its paths resolve upstream as a
+# synced copy's do. It is listed once as carried, not scanned.
+#
+# Path lists (spec 4.3): every list of paths git prints -- ls-files, ls-tree,
+# status -- is read with -z and split on NUL, never by line. In line form git
+# quotes a name with a byte above 0x7f ("docs/specs/caf\303\251.md"), git
+# status quotes a name with a space, and a staged rename prints as
+# `old -> new`: read by line, the first vanished from every list, and the
+# other two were listed as predating the gate. Read with -z, every name is
+# itself, the rename's new path is gated, and its old path -- which the
+# index no longer holds -- is dropped.
+#
+# Exit codes:
+#   0  sound    -- every checked document is sound
+#   1  defect   -- a header miss, a dangling path, or a required line missing
+#   2  unknown  -- no defect, but some check could not run: not a git repo, no
+#                  commits, a template missing or unparseable, a git command
+#                  that failed mid-check. What could not run is named.
+#   A defect wins over could-not-run: both are printed, and the exit is 1.
+#
+# Usage: bin/scaffold-doc-check              # every document the rules select
+#        bin/scaffold-doc-check <path>...    # these files only, by every check
+#                                            # that applies to the path; the
+#                                            # header and required-line gates
+#                                            # apply whatever the file's history
+#                                            # (the pre-issue form for a spec)
+set -uo pipefail
+export GIT_OPTIONAL_LOCKS=0
+
+EXIT_SOUND=0
+EXIT_DEFECT=1
+EXIT_UNKNOWN=2
+
+IGNORE="${SCAFFOLD_BRIEF_IGNORE:-.briefcheckignore}"
+SPEC_TEMPLATE="docs/specs/component-spec-TEMPLATE.md"
+ADR_TEMPLATE="docs/decisions/adr-TEMPLATE.md"
+# The cutoff for the header gate is the commit that first added this path.
+TOOL_PATH="bin/scaffold-doc-check"
+MARKER='<!-- required -->'
+
+# Spec 4.5: the filled planning documents and their templates. This table is
+# the script's only list of planning documents.
+PLANNING_DOCS=(
+  docs/planning/handoff-brief.md
+  docs/planning/master-plan.md
+  WORKING-AGREEMENT.md
+)
+PLANNING_TEMPLATES=(
+  docs/planning/handoff-brief-TEMPLATE.md
+  docs/planning/master-plan-TEMPLATE.md
+  docs/planning/WORKING-AGREEMENT-TEMPLATE.md
+)
+
+defects=0   # defect lines printed
+unknown=0   # checks that could not run
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+GIT_ERR="$TMP/git.err"
+
+# g <varname> <git args...>: run git with stdout into the named variable. On
+# failure, print git's own stderr indented -- never discarded -- and return
+# its exit code, so the caller can count the check as could-not-run.
+g() {
+  local __var="$1"; shift
+  local out rc
+  out="$(git "$@" 2>"$GIT_ERR")"; rc=$?
+  printf -v "$__var" '%s' "$out"
+  if [ "$rc" -ne 0 ]; then
+    echo "  git $* exited ${rc}:"
+    sed 's/^/    /' "$GIT_ERR"
+  fi
+  return "$rc"
+}
+# gz <file> <git args...>: as g, but stdout goes to the named file. For the
+# path lists, which are read with -z: a NUL cannot be held in a variable.
+gz() {
+  local __file="$1"; shift
+  local rc
+  git "$@" >"$__file" 2>"$GIT_ERR"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  git $* exited ${rc}:"
+    sed 's/^/    /' "$GIT_ERR"
+  fi
+  return "$rc"
+}
+
+finding() {   # finding <TAG> <file> <what>
+  echo "  $1 $2: $3"
+  defects=$((defects + 1))
+}
+could_not_run() {   # could_not_run <what>
+  echo "  could not run: $1"
+  unknown=$((unknown + 1))
+}
+trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+# starts_with <line> <prefix>: true when the line begins with the prefix.
+starts_with() { [ "${1:0:${#2}}" = "$2" ]; }
+
+# blank_fences <file>: the file with every line inside a fenced code block
+# replaced by an empty line, so line numbers hold. A fence opens with a line
+# starting with three or more backticks or tildes and closes with a line
+# starting with that same run (at least as long: CommonMark's rule, so a
+# four-backtick fence can quote a three-backtick one). An unclosed fence runs
+# to the end of the file.
+blank_fences() {
+  awk '
+    !inf && match($0, /^(```+|~~~+)/) { inf = 1; fence = substr($0, 1, RLENGTH); print ""; next }
+    inf && substr($0, 1, length(fence)) == fence { inf = 0; print ""; next }
+    inf { print ""; next }
+    { print }
+  ' "$1"
+}
+# unfenced <file>: the path of a blank_fences copy of the file, made once and
+# named after its source. The header gate and the required-line gate read
+# fields and sections from this view (spec 4.1, amendment 3); the reference
+# check reads the file itself.
+declare -A UNFENCED=()
+unfenced() {
+  local f="$1"
+  if [ -z "${UNFENCED[$f]+x}" ]; then
+    UNFENCED[$f]="$TMP/unfenced.${#UNFENCED[@]}.$(basename "$f")"
+    blank_fences "$f" > "${UNFENCED[$f]}"
+  fi
+  printf '%s\n' "${UNFENCED[$f]}"
+}
+
+# ------------------------------------------------------------------ preflight
+
+if ! git rev-parse --git-dir >/dev/null 2>"$GIT_ERR"; then
+  echo "== ${TOOL_PATH} =="
+  echo "  not a git repo -- cannot check"
+  sed 's/^/    /' "$GIT_ERR"
+  exit $EXIT_UNKNOWN
+fi
+prefix="$(git rev-parse --show-prefix 2>"$GIT_ERR")"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "== ${TOOL_PATH} =="
+  echo "  git rev-parse --show-prefix exited ${rc}:"
+  sed 's/^/    /' "$GIT_ERR"
+  could_not_run "the repo-root test (git rev-parse --show-prefix failed) -- nothing was checked"
+  exit $EXIT_UNKNOWN
+fi
+if [ -n "$prefix" ]; then
+  echo "== ${TOOL_PATH} =="
+  echo "  run this from the repo root (you are in ${prefix}) -- paths are repo-relative"
+  exit $EXIT_UNKNOWN
+fi
+if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+  echo "== ${TOOL_PATH} =="
+  echo "  repo has no commits -- cannot check"
+  exit $EXIT_UNKNOWN
+fi
+
+# ------------------------------------------------------------- the arguments
+
+# With paths, only those files are checked, by every check that applies to
+# the path. A path that does not exist is named and counted as could-not-run.
+ARGS=()
+for a in "$@"; do
+  a="${a#./}"
+  if [ -f "$a" ]; then ARGS+=("$a")
+  else echo "== ${a} =="; could_not_run "${a}: no such file"; fi
+done
+WITH_PATHS=false
+[ $# -eq 0 ] || WITH_PATHS=true
+
+in_args() {   # in_args <path>: true when the path was given as an argument
+  local x
+  for x in ${ARGS[@]+"${ARGS[@]}"}; do [ "$x" = "$1" ] && return 0; done
+  return 1
+}
+
+# ---------------------------------------------------------- 4.1 header gate
+
+# From a template or a document, read through unfenced (a line inside a fence
+# is never a field or a section). Fields are lines matching
+# ^\*\*([^*]+):\*\*; the label is the text between the markers. Sections are
+# lines beginning "## ", in order.
+template_fields()   { sed -nE 's/^\*\*([^*]+):\*\*.*/\1/p' "$(unfenced "$1")"; }
+template_sections() { grep -E '^## ' "$(unfenced "$1")" || true; }
+# field_count <file> <label>: lines starting **<label>:**
+field_count() { awk -v p="**$2:**" 'index($0, p) == 1 { n++ } END { print n + 0 }' "$(unfenced "$1")"; }
+# field_value <file> <label>: the value of the first line starting
+# **<label>:** -- the rest of that line plus following lines up to the next
+# blank line or the next field line, joined, whitespace collapsed. The same
+# reading for the template and the document (spec 4.1, amendment 2), so a
+# two-line placeholder left in place compares equal to the template's and is
+# caught; read as one line only, the template's first line would never equal
+# the document's two.
+field_value() {
+  awk -v p="**$2:**" '
+    function ends(l) { return l ~ /^[[:space:]]*$/ || l ~ /^\*\*[^*]+:\*\*/ }
+    !found && index($0, p) == 1 { found = 1; print substr($0, length(p) + 1); next }
+    found { if (ends($0)) exit; print }
+  ' "$(unfenced "$1")" | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'
+}
+# allowed_statuses <template Status value>: the first word of each |-part
+allowed_statuses() { printf '%s\n' "$1" | tr '|' '\n' | awk 'NF { print $1 }' | paste -sd' ' -; }
+
+# judge_header_field <doc> <template> <label>: one HEADER line per miss.
+judge_header_field() {
+  local f="$1" t="$2" label="$3" n tval dval first allowed
+  n="$(field_count "$f" "$label")"
+  if [ "$n" -eq 0 ]; then finding HEADER "$f" "field ${label} missing"; return; fi
+  [ "$n" -eq 1 ] || finding HEADER "$f" "field ${label} appears ${n} times -- exactly once"
+  tval="$(field_value "$t" "$label")"
+  dval="$(field_value "$f" "$label")"
+  if [ -z "$dval" ]; then
+    finding HEADER "$f" "field ${label} empty"
+  elif [ "$dval" = "$tval" ]; then
+    finding HEADER "$f" "field ${label} unfilled -- still the template's value"
+  elif [ "$label" = Status ]; then
+    first="${dval%% *}"
+    allowed="$(allowed_statuses "$tval")"
+    printf '%s\n' $allowed | grep -Fxq -- "$first" \
+      || finding HEADER "$f" "Status '${first}' is not one of: ${allowed}"
+  fi
+}
+
+# check_header <doc> <template>: the gated document against its template.
+check_header() {
+  local f="$1" t="$2" label h ln prev_ln=0 prev_h=""
+  echo "  checked  ${f}"
+  while IFS= read -r label; do
+    [ -n "$label" ] || continue
+    judge_header_field "$f" "$t" "$label"
+  done <<< "$(template_fields "$t")"
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    ln="$(grep -nFx -- "$h" "$(unfenced "$f")" | head -1 | cut -d: -f1)"
+    if [ -z "$ln" ]; then finding HEADER "$f" "section \"${h}\" missing"; continue; fi
+    if [ "$ln" -lt "$prev_ln" ]; then
+      finding HEADER "$f" "section \"${h}\" (line ${ln}) out of template order -- comes before \"${prev_h}\" (line ${prev_ln})"
+    else
+      prev_ln=$ln; prev_h="$h"
+    fi
+  done <<< "$(template_sections "$t")"
+}
+
+# template_usable <template>: true when it can be read and yields fields and
+# sections; otherwise names the problem and counts could-not-run.
+template_usable() {
+  if [ ! -r "$1" ]; then could_not_run "${1} missing -- its half of the header gate did not run"; return 1; fi
+  if [ -z "$(template_fields "$1")" ]; then could_not_run "${1} has no **Field:** line -- its half of the header gate did not run"; return 1; fi
+  if [ -z "$(template_sections "$1")" ]; then could_not_run "${1} has no ## section -- its half of the header gate did not run"; return 1; fi
+  return 0
+}
+
+# header_kind <path>: spec, adr, or empty when the path is not header-gated
+# (README.md and *-TEMPLATE.md are not specs or ADRs).
+header_kind() {
+  case "$1" in
+    docs/specs/README.md|docs/decisions/README.md|*-TEMPLATE.md) ;;
+    docs/specs/*.md)     [[ "${1#docs/specs/}" != */* ]] && echo spec ;;
+    docs/decisions/*.md) [[ "${1#docs/decisions/}" != */* ]] && echo adr ;;
+  esac
+  return 0
+}
+
+# is_gated <path> <kind> <status XY>: without path arguments. A spec is gated
+# if untracked, modified in tree or index, or touched by a commit after the
+# cutoff. An ADR only if untracked or ADDED after the cutoff: an ADR is never
+# rewritten to fit a later template, and a status change on an old ADR is not
+# a reason to gate it (scaffolding 030). Returns 2 when git log failed.
+is_gated() {
+  local c="$1" kind="$2" stat="$3" cm
+  case "$kind" in
+    spec)
+      [ -n "$stat" ] && return 0
+      g cm log --format=%H "${cutoff}..HEAD" -- "$c" || return 2
+      [ -n "$cm" ] ;;
+    adr)
+      [ "$stat" = "??" ] && return 0
+      [ "${stat:0:1}" = "A" ] && return 0
+      g cm log --diff-filter=A --format=%H "${cutoff}..HEAD" -- "$c" || return 2
+      [ -n "$cm" ] ;;
+  esac
+}
+
+echo "== header gate -- do specs and ADRs carry their template's fields and sections? =="
+
+# Which templates this run needs: without path arguments, both. With them,
+# only the kinds the arguments name (spec section 2: a named path is checked
+# by every check that applies to it, and no other), so a run on the planning
+# documents alone reads neither, and an absent ADR template is could-not-run
+# only when an ADR is named.
+need_spec=true; need_adr=true
+if $WITH_PATHS; then
+  need_spec=false; need_adr=false
+  for c in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$(header_kind "$c")" in spec) need_spec=true ;; adr) need_adr=true ;; esac
+  done
+fi
+spec_ok=false; adr_ok=false
+if $need_spec; then spec_ok=true; template_usable "$SPEC_TEMPLATE" || spec_ok=false; fi
+if $need_adr;  then adr_ok=true;  template_usable "$ADR_TEMPLATE"  || adr_ok=false;  fi
+
+n_checked=0; n_predate=0; predates=""
+hdr_before=$defects
+
+if $WITH_PATHS; then
+  # Both gates apply to a named path whatever its history: the pre-issue form.
+  for c in ${ARGS[@]+"${ARGS[@]}"}; do
+    kind="$(header_kind "$c")"
+    case "$kind" in
+      spec) $spec_ok || continue; check_header "$c" "$SPEC_TEMPLATE"; n_checked=$((n_checked + 1)) ;;
+      adr)  $adr_ok  || continue; check_header "$c" "$ADR_TEMPLATE";  n_checked=$((n_checked + 1)) ;;
+    esac
+  done
+else
+  header_run=true
+  # Tracked or untracked *.md directly under the two directories, NUL-separated.
+  if ! gz "$TMP/lst" ls-files -co --exclude-standard -z -- docs/specs docs/decisions; then
+    could_not_run "the spec and ADR list (git ls-files failed) -- the header gate did not run"; header_run=false
+  fi
+  if $header_run; then
+    if g cut log --diff-filter=A --format=%H -- "$TOOL_PATH"; then
+      cutoff="$(printf '%s\n' "$cut" | tail -n 1)"
+      if [ -n "$cutoff" ]; then echo "  cutoff: ${cutoff} (first commit adding ${TOOL_PATH})"
+      else cutoff=HEAD; echo "  cutoff: HEAD (${TOOL_PATH} is not yet committed; only the working tree is gated)"; fi
+    else
+      could_not_run "the cutoff (git log failed) -- the header gate did not run"; header_run=false
+    fi
+  fi
+  if $header_run && ! gz "$TMP/st" status --porcelain -z --untracked-files=all -- docs/specs docs/decisions; then
+    could_not_run "working-tree state (git status failed) -- the header gate did not run"; header_run=false
+  fi
+  if $header_run; then
+    # XY per path, from the -z form: `XY path NUL`. A renamed or copied entry
+    # (R or C in XY) is the new path, then the old path as a record of its
+    # own; the new path is the candidate, the old one is no longer in the
+    # index and is dropped here.
+    declare -A STAT=()
+    while IFS= read -r -d '' rec; do
+      xy="${rec:0:2}"
+      STAT["${rec:3}"]="$xy"
+      case "$xy" in *R*|*C*) IFS= read -r -d '' old || true ;; esac
+    done < "$TMP/st"
+    grep -zE '^docs/(specs|decisions)/[^/]+\.md$' "$TMP/lst" | sort -zu > "$TMP/cands" || true
+    while IFS= read -r -d '' c; do
+      kind="$(header_kind "$c")"
+      [ -n "$kind" ] || continue
+      if [ ! -f "$c" ]; then echo "  skipped  ${c} (in the index, not in the working tree)"; continue; fi
+      stat="${STAT[$c]-}"
+      if is_gated "$c" "$kind" "$stat"; then
+        case "$kind" in
+          spec) $spec_ok || continue; check_header "$c" "$SPEC_TEMPLATE" ;;
+          adr)  $adr_ok  || continue; check_header "$c" "$ADR_TEMPLATE" ;;
+        esac
+        n_checked=$((n_checked + 1))
+      else
+        rc=$?
+        if [ "$rc" -eq 2 ]; then could_not_run "${c}: its history (git log failed) -- not gated"; continue; fi
+        n_predate=$((n_predate + 1)); predates="${predates}    ${c}"$'\n'
+      fi
+    done < "$TMP/cands"
+    if [ "$n_predate" -gt 0 ]; then
+      echo "  predates the gate (${n_predate}, not a defect and not unknown):"
+      printf '%s' "$predates"
+    fi
+  fi
+fi
+echo "  ${n_checked} checked, $((defects - hdr_before)) defect line(s), ${n_predate} predate the gate"
+
+# ------------------------------------------------------- 4.2 reference check
+
+echo
+echo "== reference check -- do the repo-relative paths in living documents resolve? =="
+
+ref_before=$defects
+n_files=0; n_ok=0; n_waived=0; n_bad=0
+declare -A RESOLVED=()   # path -> ok | waived | bad, so a path repeated across files is resolved once
+
+waived=""
+if [ -f "$IGNORE" ]; then
+  waived="$(grep -vE '^[[:space:]]*(#|$)' "$IGNORE" | sed 's/[[:space:]]*$//' || true)"
+fi
+in_waived() { [ -n "$waived" ] && printf '%s\n' "$waived" | grep -Fxq -- "$1"; }
+
+# resolve <file> <line> <path>: brief-check's resolution -- git ls-files
+# non-empty (a tracked file there, or beneath it), else waived, else dangling.
+resolve() {
+  local f="$1" ln="$2" p="$3" rc
+  if [ -z "${RESOLVED[$p]+x}" ]; then
+    git ls-files -z -- "$p" >"$TMP/resolve" 2>"$GIT_ERR"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "  git ls-files -z -- ${p} exited ${rc}:"; sed 's/^/    /' "$GIT_ERR"
+      could_not_run "${f}:${ln} ${p} -- not resolved"
+      return
+    fi
+    if [ -s "$TMP/resolve" ]; then RESOLVED[$p]=ok
+    elif in_waived "$p"; then RESOLVED[$p]=waived
+    else RESOLVED[$p]=bad; fi
+  fi
+  case "${RESOLVED[$p]}" in
+    ok)     n_ok=$((n_ok + 1)) ;;
+    waived) echo "  WAIVED   ${f}:${ln} ${p}  (listed in ${IGNORE})"; n_waived=$((n_waived + 1)) ;;
+    bad)    echo "  DANGLING ${f}:${ln} ${p}"; n_bad=$((n_bad + 1)); defects=$((defects + 1)) ;;
+  esac
+}
+
+# scan_refs <file>: brief-check's extraction, kept line-numbered. A path is a
+# tracked top-level directory followed by /[A-Za-z0-9._/-]*, not preceded by a
+# path character or ~ (absolute paths, ~ paths and URLs are machines' and
+# remotes' business); trailing .,:;) trimmed. Each distinct path in a file is
+# reported once, at its first line.
+scan_refs() {
+  local f="$1" matches m ln rest p seen=""
+  n_files=$((n_files + 1))
+  matches="$(grep -noE "(^|[^A-Za-z0-9._/~-])(${roots})/[A-Za-z0-9._/-]*" "$f" || true)"
+  [ -n "$matches" ] || return 0
+  while IFS= read -r m; do
+    ln="${m%%:*}"; rest="${m#*:}"
+    p="$(printf '%s\n' "$rest" | grep -oE "(${roots})/[A-Za-z0-9._/-]*" | head -1 | sed 's/[.,:;)]*$//')"
+    [ -n "$p" ] || continue
+    printf '%s\n' "$seen" | grep -Fxq -- "$p" && continue
+    seen="${seen}${p}"$'\n'
+    resolve "$f" "$ln" "$p"
+  done <<< "$matches"
+}
+
+# Which files are living documents (without path arguments): every tracked
+# *.md except the exclusions below, each with its reason (spec 4.2 table).
+# In: a file of NUL-separated tracked paths; out: the same form. The last
+# two rows of that table -- synced copies and the carried profile, both
+# downstream only -- are applied by the caller: the first is read from
+# bin/scaffold-update and may be unreadable, the second depends on the same
+# upstream test.
+living_documents() {
+  grep -zE '\.md$' "$1" | grep -zvE \
+    -e '^docs/correspondence/' \
+    -e '^docs/session-logs/' \
+    -e '^docs/decisions/' \
+    -e '^WORKING-AGREEMENT\.md$' \
+    -e '^CHANGELOG\.md$' \
+    -e '-TEMPLATE\.md$' \
+    -e '^docs/planning/handoff-brief\.md$' \
+    || true
+  # docs/correspondence/**        filed byte for byte; its paths resolve in the sender's repo
+  # docs/session-logs/**          a record of the tree as it was
+  # docs/decisions/**             a decision as made; never rewritten
+  # WORKING-AGREEMENT.md, CHANGELOG.md   logs
+  # *-TEMPLATE.md                 placeholders, not references
+  # docs/planning/handoff-brief.md       brief-check's (spec section 5: this tool does not
+  #                               check the brief's references); a path argument still scans it
+  # every path in SYNCED, downstream      an upstream-owned copy; its paths resolve upstream, as a
+  #                               letter's resolve in the sender's repo (amendment 2; below)
+  # OPERATOR-PROFILE.md, downstream        carried from upstream and stamped (amendment 3); its paths
+  #                               resolve upstream. Listed as carried (resolves upstream)
+}
+# carried_profile <docs file>: true when OPERATOR-PROFILE.md is among the
+# living documents. Downstream it is carried from upstream and stamped, not
+# this repo's own (spec 4.2, amendment 3), so it is listed, not scanned.
+carried_profile() { grep -zFxq -- OPERATOR-PROFILE.md "$1"; }
+# nul_count <file>: how many NUL-terminated records the file holds.
+nul_count() { tr -cd '\000' < "$1" | wc -c | tr -d ' '; }
+
+# synced_list: bin/scaffold-update's SYNCED array, read as bin/scaffold-freshness
+# reads it. Empty when the file or the array is missing or unreadable.
+synced_list() {
+  [ -f bin/scaffold-update ] || return 0
+  sed -n '/^SYNCED=(/,/^)/p' bin/scaffold-update | sed '1d;$d' \
+    | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' || true
+}
+# is_upstream: the test bin/scaffold-freshness uses -- an export/ directory.
+# Upstream, synced files are this repo's own and are scanned.
+is_upstream() { [ -d export ]; }
+
+# The roots become one alternation in a regex, so a newline inside a top-level
+# directory's name has nowhere to go; that name is read whole and quoted.
+if gz "$TMP/roots" ls-tree -d --name-only -z HEAD; then
+  roots="$(tr '\000' '\n' < "$TMP/roots" | sed 's/[]\\.*^$()+?{}|[]/\\&/g' | paste -sd'|' -)"
+  if [ -z "$roots" ]; then
+    echo "  no tracked top-level directories -- nothing a repo-relative path could start with"
+  elif $WITH_PATHS; then
+    for f in ${ARGS[@]+"${ARGS[@]}"}; do scan_refs "$f"; done
+  elif gz "$TMP/all" ls-files -z; then
+    living_documents "$TMP/all" > "$TMP/docs"
+    if is_upstream; then
+      echo "  this repo is the upstream (export/ present) -- synced files are its own and are scanned"
+    else
+      synced="$(synced_list)"
+      if [ -z "$synced" ]; then
+        could_not_run "the SYNCED array in bin/scaffold-update (missing or unreadable) -- synced copies were scanned as this repo's own"
+      else
+        grep -zFxf  <(printf '%s\n' "$synced") "$TMP/docs" > "$TMP/synced_docs" || true
+        grep -zvFxf <(printf '%s\n' "$synced") "$TMP/docs" > "$TMP/docs.own"    || true
+        mv "$TMP/docs.own" "$TMP/docs"
+        n_synced="$(nul_count "$TMP/synced_docs")"
+        # The heading only when something stands under it (scaffolding 034's
+        # re-check: it printed "(0, ...)" over nothing).
+        if [ "$n_synced" -gt 0 ]; then
+          echo "  synced (resolves upstream) (${n_synced}, upstream-owned copies, not scanned here):"
+          tr '\000' '\n' < "$TMP/synced_docs" | sed 's/^/    /'
+        fi
+      fi
+      if carried_profile "$TMP/docs"; then
+        grep -zvFx -- OPERATOR-PROFILE.md "$TMP/docs" > "$TMP/docs.own" || true
+        mv "$TMP/docs.own" "$TMP/docs"
+        echo "  carried (resolves upstream) (1, OPERATOR-PROFILE.md is carried from upstream and stamped, not scanned here):"
+        echo "    OPERATOR-PROFILE.md"
+      fi
+    fi
+    while IFS= read -r -d '' f; do
+      if [ ! -f "$f" ]; then echo "  skipped  ${f} (in the index, not in the working tree)"; continue; fi
+      scan_refs "$f"
+    done < "$TMP/docs"
+  else
+    could_not_run "the living-document list (git ls-files failed) -- the reference check did not run"
+  fi
+else
+  could_not_run "the path roots (git ls-tree failed) -- the reference check did not run"
+fi
+echo "  ${n_files} file(s) scanned: ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling"
+if [ "$n_bad" -gt 0 ]; then
+  echo "  -> the file was never written (write it), it was renamed (fix the reference), or its"
+  echo "     absence is intentional (add the path to ${IGNORE} with a comment saying why)"
+fi
+
+# --------------------------------------------------- 4.5 required-line gate
+
+echo
+echo "== required-line gate -- do the planning documents carry their templates' ${MARKER} lines? =="
+
+req_before=$defects
+n_req_checked=0; n_absent=0; n_req_unknown=0
+
+# shares_placeholder <value> <template value>: true when a [...] token of the
+# template value survives in the filled value (a half-filled line such as
+# `[short-sha] (2026-10-24)`). A bracketed token the template does not carry,
+# such as `[Kara]`, is not a placeholder.
+shares_placeholder() {
+  local tok
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    [[ "$1" == *"$tok"* ]] && return 0
+  done <<< "$(printf '%s\n' "$2" | grep -oE '\[[^]]*\]' || true)"
+  return 1
+}
+
+# judge_required_field <doc> <label> <template value>: the first line
+# starting **<label>:** is judged, as brief-check reads **Written:**.
+judge_required_field() {
+  local doc="$1" label="$2" tval="$3" line val
+  line="$(awk -v p="**$2:**" 'index($0, p) == 1 { print; exit }' "$(unfenced "$doc")")"
+  if [ -z "$line" ]; then finding REQUIRED "$doc" "field ${label} missing"; return; fi
+  val="${line#"**${label}:**"}"
+  val="$(trim "${val//"$MARKER"/}")"
+  if [ -z "$val" ]; then
+    finding REQUIRED "$doc" "field ${label} unfilled -- empty"
+  elif [ "$val" = "$tval" ]; then
+    finding REQUIRED "$doc" "field ${label} unfilled -- still the template's value"
+  elif shares_placeholder "$val" "$tval"; then
+    finding REQUIRED "$doc" "field ${label} unfilled -- a placeholder of the template's value is still in it"
+  fi
+}
+
+# judge_required_section <doc> <match text> <exact|prefix>: a line equal to
+# the match text (no [ in the template heading) or starting with it. A
+# trailing marker on the document's line is ignored, as for fields.
+judge_required_section() {
+  local doc="$1" match="$2" mode="$3" line hit=false
+  while IFS= read -r line; do
+    line="$(printf '%s' "$line" | sed -E "s/[[:space:]]*${MARKER}[[:space:]]*\$//")"
+    if [ "$mode" = exact ]; then [ "$line" = "$match" ] && { hit=true; break; }
+    else starts_with "$line" "$match" && { hit=true; break; }
+    fi
+  done < <(grep -E '^## ' "$(unfenced "$doc")" || true)
+  $hit || finding REQUIRED "$doc" "section \"${match}\" missing"
+}
+
+# check_required <doc> <template>
+check_required() {
+  local doc="$1" tpl="$2" marked m ln text label tval match mode bad="" summary=""
+  local -a kinds=() labels=() tvals=() matches=() modes=()
+  if [ ! -r "$tpl" ]; then
+    could_not_run "${tpl} missing -- the required-line gate for ${doc} did not run"
+    n_req_unknown=$((n_req_unknown + 1)); return
+  fi
+  marked="$(grep -nE "${MARKER}[[:space:]]*\$" "$(unfenced "$tpl")" | sed -E "s/[[:space:]]*${MARKER}[[:space:]]*\$//" || true)"
+  if [ -z "$marked" ]; then
+    could_not_run "${tpl} has no ${MARKER} line -- the required-line gate for ${doc} did not run"
+    n_req_unknown=$((n_req_unknown + 1)); return
+  fi
+  while IFS= read -r m; do
+    ln="${m%%:*}"; text="${m#*:}"
+    if [[ "$text" =~ ^\*\*([^*]+):\*\*(.*)$ ]]; then
+      kinds+=(field); labels+=("${BASH_REMATCH[1]}"); tvals+=("$(trim "${BASH_REMATCH[2]}")"); matches+=(""); modes+=("")
+      summary="${summary}; field ${BASH_REMATCH[1]}"
+    elif [[ "$text" == "## "* ]]; then
+      if [[ "$text" == *"["* ]]; then match="${text%%\[*}"; mode=prefix; else match="$text"; mode=exact; fi
+      kinds+=(section); labels+=(""); tvals+=(""); matches+=("$match"); modes+=("$mode")
+      [ "$mode" = exact ] && summary="${summary}; section \"${match}\"" || summary="${summary}; section prefix \"${match}\""
+    else
+      bad="${bad}  ${tpl}:${ln} marked line is neither a field nor a section: ${text}"$'\n'
+    fi
+  done <<< "$marked"
+  if [ -n "$bad" ]; then
+    printf '%s' "$bad"
+    could_not_run "${tpl} has a marked line that is neither a field nor a section -- the required-line gate for ${doc} did not run"
+    n_req_unknown=$((n_req_unknown + 1)); return
+  fi
+  echo "  requires (${tpl}): ${summary#; }"
+  if [ ! -f "$doc" ]; then echo "  absent   ${doc}"; n_absent=$((n_absent + 1)); return; fi
+  echo "  checked  ${doc}"
+  n_req_checked=$((n_req_checked + 1))
+  local i
+  for i in "${!kinds[@]}"; do
+    if [ "${kinds[$i]}" = field ]; then judge_required_field "$doc" "${labels[$i]}" "${tvals[$i]}"
+    else judge_required_section "$doc" "${matches[$i]}" "${modes[$i]}"; fi
+  done
+}
+
+for i in "${!PLANNING_DOCS[@]}"; do
+  doc="${PLANNING_DOCS[$i]}"; tpl="${PLANNING_TEMPLATES[$i]}"
+  if $WITH_PATHS; then in_args "$doc" || continue; fi
+  check_required "$doc" "$tpl"
+done
+echo "  ${n_req_checked} checked, ${n_absent} absent, $((defects - req_before)) defect line(s), ${n_req_unknown} could not run"
+
+# ------------------------------------------------------------------- verdict
+
+echo
+if [ "$defects" -gt 0 ]; then
+  echo "defect -- ${defects} finding(s)"
+  exit $EXIT_DEFECT
+fi
+if [ "$unknown" -gt 0 ]; then
+  echo "unknown -- ${unknown} check(s) could not run"
+  exit $EXIT_UNKNOWN
+fi
+echo "sound -- headers complete, references resolve or are waived, required lines present"
+exit $EXIT_SOUND

@@ -89,11 +89,16 @@ several specific corrections usually collapse into one general principle.
 5. **Commit in two commits, in this order.** First: WORKING-AGREEMENT.md, any new or changed ADRs, and the session logs. Second: the handoff brief, stamped with the hash of the first commit. Writing the brief and the thing the brief cites into one commit makes the brief unable to name a hash that exists yet, and bin/scaffold-freshness then reports the brief stale at every closeout -- a red check the operator learns to ignore. The stamp is bumped as part of writing the brief, never by hand afterward.
    The stamp line has exactly one form, the one `bin/scaffold-freshness` parses:
    `**Stamped:** <short-sha> (<YYYY-MM-DD>)`, optionally followed by
-   ` -- <note>`. **Before the second commit, `bin/scaffold-brief-check` must
-   exit 0.** It checks that every path the brief cites is tracked, that the
+   ` -- <note>`. **Before the first commit, `bin/scaffold-doc-check` must
+   exit 0.** It holds each new document's header, and each revised spec's,
+   to its template; checks that every repo-relative path a living document
+   names resolves; and fails on each required line a planning document
+   lacks. A non-zero exit means fix the document, not the check. **Before the second commit,
+   `bin/scaffold-brief-check` must exit 0.** It checks that every path the brief cites is tracked, that the
    OBJECTIVE is quoted verbatim, and that the stamp is well-formed and names a
    real commit. A non-zero exit means fix the brief, not the check. The commit
-   pattern below chains the two, so the commit cannot land without the check.
+   pattern below chains each check to its commit, so neither commit can land
+   without its check.
    *Cost: a downstream closeout wrote its stamp as prose; freshness exited 2 at
    the next opening and the check chain skipped the checks after it. The form
    lived only in the brief template, and nothing compared the brief to it.*
@@ -113,9 +118,10 @@ several specific corrections usually collapse into one general principle.
    end of the document the closeout already writes.
 
    **When the session left work in more than one repo, the brief also states
-   the order of work across all of them** -- decided, with its reason, never
-   offered as a choice. The operator cannot weigh one project against
-   another from inside one of them. A project created during the session gets
+   the order of work across all of them** -- a decision, never a choice
+   offered: each entry names what that session does and why it holds its
+   position. The operator cannot weigh one project against another from
+   inside one of them. A project created during the session gets
    its own closeout first: its brief brought current and its opening block
    written. *Cost: a closeout named its own next session, then added that
    another project would serve the objective better; the same brief was read
@@ -128,7 +134,7 @@ several specific corrections usually collapse into one general principle.
 
 ```bash
 git add WORKING-AGREEMENT.md docs/decisions/ docs/session-logs/
-git commit -m "session NNN: short description"
+bin/scaffold-doc-check && git commit -m "session NNN: short description"
 git log -1 --format=%h   # stamp the brief with this
 
 git add docs/planning/handoff-brief.md

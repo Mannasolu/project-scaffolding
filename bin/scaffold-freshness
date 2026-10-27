@@ -237,18 +237,42 @@ else
   brief_stamp="$(stamp_of docs/planning/handoff-brief.md)"
   # docs/decisions/*-TEMPLATE.md is synced method, not a decision: a method
   # sync must not read as a stale brief (scaffolding item 43).
-  newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md ':(exclude)docs/decisions/*-TEMPLATE.md' 2>/dev/null || true)"
-  if [ -z "$brief_stamp" ]; then
+  # A git failure here is unknown, not "no decisions": its exit code and
+  # stderr are kept and shown, never discarded (scaffolding session 029
+  # finding; docs/specs/scaffold-freshness-git-error.md). The pattern is
+  # bin/scaffold-init's for gh: capture, then branch on rc.
+  if newest_decision="$(git log -1 --format=%h -- docs/decisions/ WORKING-AGREEMENT.md ':(exclude)docs/decisions/*-TEMPLATE.md' 2>"${TMP}/git-log.err")"; then log_rc=0; else log_rc=$?; fi
+  if [ "$log_rc" -ne 0 ]; then
+    echo "  could not read decision history -- git exited ${log_rc}:"
+    sed 's/^/    /' "${TMP}/git-log.err"
+    mark_unknown
+  elif [ -z "$brief_stamp" ]; then
     echo "  no stamp found -- cannot verify freshness. Add '**Stamped:** <sha> (<date>)' under Last updated."
     mark_unknown
   elif [ -z "$newest_decision" ]; then
     echo "  no decisions tracked yet"
-  elif [ "$brief_stamp" = "$newest_decision" ] || git merge-base --is-ancestor "$newest_decision" "$brief_stamp" 2>/dev/null; then
-    echo "  up to date (${brief_stamp})"
   else
-    echo "  STALE -- brief stamped ${brief_stamp}, but docs/decisions/ or WORKING-AGREEMENT.md"
-    echo "  changed since (newest: ${newest_decision}). Rewrite the brief before trusting it."
-    mark_stale
+    # merge-base --is-ancestor: 0 ancestor, 1 not an ancestor (data), any
+    # other exit is a failure -- an unreadable stamp, a broken repo -- and
+    # reads as unknown, not stale.
+    if [ "$brief_stamp" = "$newest_decision" ]; then
+      ancestor_rc=0
+    elif git merge-base --is-ancestor "$newest_decision" "$brief_stamp" 2>"${TMP}/git-merge-base.err"; then
+      ancestor_rc=0
+    else
+      ancestor_rc=$?
+    fi
+    if [ "$ancestor_rc" -eq 0 ]; then
+      echo "  up to date (${brief_stamp})"
+    elif [ "$ancestor_rc" -eq 1 ]; then
+      echo "  STALE -- brief stamped ${brief_stamp}, but docs/decisions/ or WORKING-AGREEMENT.md"
+      echo "  changed since (newest: ${newest_decision}). Rewrite the brief before trusting it."
+      mark_stale
+    else
+      echo "  could not read decision history -- git exited ${ancestor_rc}:"
+      sed 's/^/    /' "${TMP}/git-merge-base.err"
+      mark_unknown
+    fi
   fi
 fi
 

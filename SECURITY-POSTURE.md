@@ -114,6 +114,16 @@ sessions before it was written down: a knowledge base that showed
 "Connected" was silently unable to serve a session that needed it. See
 ADR-005.
 
+## An unattended reader runs under its own credential
+
+A reader that runs unattended -- a scheduled sweep, a hook, anything that
+calls a remote with no person at the keyboard -- runs under its own
+least-privilege credential, never the operator's login, and it reports its
+credential's expiry before that expiry makes it fail. The credential's scope
+is read from the reader's code, every call on its path enumerated, not from
+a description of the reader: a call the credential cannot make reports as
+unknown, and the credential is never widened to make the call pass.
+
 ## Version
 
 See `VERSION`. Synced by `bin/scaffold-update`.

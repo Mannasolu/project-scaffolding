@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Verify the handoff brief against the repo it describes. Three checks:
+# Verify the handoff brief against the repo it describes. Four checks:
 #
 #   1. References -- every repo-relative path the brief names is tracked.
 #   2. Objective  -- the brief quotes the OBJECTIVE verbatim from its source.
 #   3. Stamp      -- exactly one **Stamped:** <sha> (<date>) line, naming a
 #                    commit that exists in this repo.
+#   4. Session    -- WORKING-AGREEMENT.md has a `## Session <NNN>` heading for
+#                    the session named on the brief's **Written:** line.
 #
 # Why (1): a session wrote its primary output as a chat heredoc that was never
 # run, then closed with the brief citing that file as done. The next session
@@ -21,6 +23,14 @@
 # parse it and exited 2, and the next session's opening check chain skipped the
 # checks after it. The form lived only in the brief template, and nothing
 # compared the brief against it.
+#
+# Why (4): CLOSEOUT-RITUAL.md requires working-agreement entries for every
+# session, and nothing checked that they were written (reported by a
+# downstream project). A closeout could produce a brief and an empty
+# harvest, and the brief read as complete. The heading for the brief's own
+# session is the evidence the harvest was done; a session with nothing to
+# log still writes the heading and says so. There is no waiver. Spec:
+# docs/specs/scaffold-brief-check.md.
 #
 # bin/scaffold-freshness checks whether copies are BEHIND their sources. This
 # checks whether the brief's references RESOLVE and whether its objective is
@@ -41,9 +51,11 @@
 # is checked against this one. Same-named files will resolve falsely.
 #
 # Exit codes:
-#   0  sound    -- paths resolve or are waived; objective matches; stamp valid
-#   1  defect   -- a path dangles, the objective is missing or differs, or
-#                  the stamp is missing, duplicated, malformed, or unresolved
+#   0  sound    -- paths resolve or are waived; objective matches; stamp valid;
+#                  the session's working-agreement section exists
+#   1  defect   -- a path dangles, the objective is missing or differs, the
+#                  stamp is missing, duplicated, malformed, or unresolved, or
+#                  the brief's session has no working-agreement section
 #   2  unknown  -- the check could not run (no brief, not a git repo)
 #
 # Usage: bin/scaffold-brief-check
@@ -52,6 +64,7 @@ export GIT_OPTIONAL_LOCKS=0
 
 BRIEF="${SCAFFOLD_BRIEF:-docs/planning/handoff-brief.md}"
 IGNORE="${SCAFFOLD_BRIEF_IGNORE:-.briefcheckignore}"
+WA="WORKING-AGREEMENT.md"
 
 EXIT_SOUND=0
 EXIT_DEFECT=1
@@ -206,10 +219,49 @@ else
   fi
 fi
 
+# ----------------------------------------------------- working agreement
+
+# The brief's session is the number in the last "session <NNN>" on its first
+# **Written:** line (the template's form: "**Written:** <date>, end of
+# <project> session <NNN>"). The section is a level-2 heading in
+# WORKING-AGREEMENT.md -- read from the working tree, since the closeout
+# writes it before the brief is checked -- whose number equals the brief's
+# as an integer: "## Session 029 -- <date>" and "## Session 29 (<date>)" both
+# satisfy session 29; "### Session 029" is a subsection and does not;
+# "## Session 0290" is another session and does not.
+written="$(grep -m1 -E '^\*\*Written:\*\*' "$BRIEF" || true)"
+session="$(printf '%s\n' "$written" | grep -oE '[Ss]ession[[:space:]]+[0-9]+' | tail -1 | grep -oE '[0-9]+$' || true)"
+
+echo
+echo "== ${WA} -- does it have a section for session ${session:-(none)}? =="
+
+# The first matching heading, as "<line>:<heading>". Empty when there is
+# none, when the brief names no session, or when the file is absent -- the
+# branches below say which.
+find_section() {
+  [ -n "$session" ] && [ -f "$WA" ] || return 0
+  local n; n=$((10#$session))
+  grep -nE '^##[[:space:]]+Session[[:space:]]+0*'"${n}"'([^0-9]|$)' "$WA" | head -1 || true
+}
+hit="$(find_section)"
+
+if [ -n "$hit" ]; then
+  echo "  section found (line ${hit%%:*})"
+elif [ -z "$session" ]; then
+  echo "  no session number on the **Written:** line -- expected '... session <NNN>'"
+  defects=$((defects + 1))
+elif [ ! -f "$WA" ]; then
+  echo "  ${WA} not present -- the document set requires it"
+  defects=$((defects + 1))
+else
+  echo "  no '## Session ${session}' section -- the closeout's working-agreement entries are missing (CLOSEOUT-RITUAL.md, step 3)"
+  defects=$((defects + 1))
+fi
+
 echo
 if [ "$defects" -gt 0 ]; then
   echo "defect -- ${defects} check(s) failed"
   exit $EXIT_DEFECT
 fi
-echo "sound -- paths resolve or are waived; objective verbatim; stamp valid"
+echo "sound -- paths resolve or are waived; objective verbatim; stamp valid; session section present"
 exit $EXIT_SOUND
