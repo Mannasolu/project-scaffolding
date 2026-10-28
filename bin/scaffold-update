@@ -22,10 +22,15 @@
 # could not be fetched. A full run that cannot fetch every file applies
 # nothing and exits 2: SYNCED is upstream's own list, so a missing file is a
 # fault, not a normal case. 3, in both modes: remote VERSION equals local
-# VERSION yet a synced file differs -- upstream changed without a bump, or
-# this copy was edited locally -- and nothing is applied until that is
-# resolved (docs/specs/version-bump-check.md). Other errors keep their exit
-# codes.
+# VERSION yet a synced file that exists locally differs -- upstream changed
+# without a bump, or this copy was edited locally -- and nothing is applied
+# until that is resolved (docs/specs/version-bump-check.md). A file missing
+# locally is new, not differing: there is no local copy to protect, so it
+# is applied at any VERSION. The self-update re-exec meets exactly that
+# case -- VERSION already equal, the new list longer -- and until v1.12.1 it
+# was refused there; the re-exec pass skips the check altogether, since the
+# pass that exec'd it already saw the bump (docs/specs/scaffold-update.md,
+# A9). Other errors keep their exit codes.
 set -euo pipefail
 
 # The arguments as given, kept for the self-update re-exec at the end.
@@ -177,6 +182,7 @@ fi
 
 CHANGED=()
 NEW=()
+MODIFIED=()   # exists locally and differs: the only kind the equal-VERSION guard counts
 FAILED=()
 in_changed() {
   local x
@@ -198,6 +204,7 @@ for f in "${SYNCED[@]}"; do
   elif ! cmp -s "$f" "$t"; then
     echo "  M  ${f}"
     CHANGED+=("$f")
+    MODIFIED+=("$f")
   fi
 done
 
@@ -230,10 +237,27 @@ fi
 # overwrite either way. Upstream's own gate (bin/scaffold-version-check) is
 # meant to make the first cause impossible; this is the refusal downstream if
 # it ever gets through.
-if [ "${#CHANGED[@]}" -gt 0 ] && [ "$(head -1 VERSION)" = "$(head -1 "${TMP}/VERSION")" ]; then
+#
+# Only MODIFIED counts, never NEW. A path missing locally has no local copy
+# that an overwrite could lose, so neither cause applies to it. Counting
+# CHANGED here, as this guard did from v1.11.0 to v1.12.0, refused the
+# self-update re-exec whenever upstream had lengthened SYNCED: the first
+# pass had already brought VERSION level, so the new copy saw equal
+# VERSIONs and the added paths as "differing", exited 3, and never applied
+# them (a downstream's sync, 2026-10-27; tests/test-template-delivery case 13).
+#
+# The guard is also skipped on the self-update re-exec. That pass runs only
+# after the pass that exec'd it applied bin/scaffold-update as modified,
+# which this guard allows only when VERSION differed (the script cannot be
+# new in a running process). So on the re-exec the bump is already proven
+# and VERSION is level by construction; a path the new list holds that the
+# project kept in another form -- a template a project copied in by hand
+# before upstream owned it -- is an update to show and prompt for, not a
+# refusal. Without this the same shape returns through the other door.
+if [ -z "${SCAFFOLD_UPDATE_REEXEC:-}" ] && [ "${#MODIFIED[@]}" -gt 0 ] && [ "$(head -1 VERSION)" = "$(head -1 "${TMP}/VERSION")" ]; then
   echo >&2
-  echo "VERSION $(head -1 VERSION) matches upstream, but ${#CHANGED[@]} synced file(s) differ:" >&2
-  printf '  %s\n' "${CHANGED[@]}" >&2
+  echo "VERSION $(head -1 VERSION) matches upstream, but ${#MODIFIED[@]} synced file(s) differ:" >&2
+  printf '  %s\n' "${MODIFIED[@]}" >&2
   echo "Two possible causes: upstream changed without a VERSION bump (scaffolding" >&2
   echo "item 33), or this copy was edited locally. Applying nothing. Inspect each" >&2
   echo "path with: diff <(gh api -H 'Accept: application/vnd.github.raw' 'repos/${UPSTREAM}/contents/<path>?ref=${BRANCH}') <path>" >&2

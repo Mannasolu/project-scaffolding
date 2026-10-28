@@ -6,6 +6,47 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.12.2
+
+- `bin/scaffold-update`: two comment lines no longer name a downstream
+  project; no behavior changes. `bin/scaffold-export`'s leak guard now
+  refuses that name and the business name, with a positive control for
+  each in its suite; two older lines of this file no longer carry the
+  business name.
+  *Cost: v1.12.1 named the project whose sync exposed the defect, in a
+  synced script and in this file, both of which ship to the public export,
+  and the leak guard did not cover the name (scaffolding item 21). It was
+  read before the export ran, so that name never shipped; the bump is the
+  price of changing synced content. The cold review of this entry then
+  found the business name in two 1.8.0 lines of this file, shipped in
+  every export since.*
+
+## 1.12.1
+
+**Upgrade note: a project whose v1.12.0 sync ended with exit 3 naming
+`bin/scaffold-doc-check` and the three `docs/planning/` templates runs
+`bin/scaffold-update` once more.** That run applies six files at one
+prompt: `VERSION`, `bin/scaffold-update` and the four it was refused; the
+other five the first run applied are already current, and `--check` then
+reads up to date.
+
+- `bin/scaffold-update`: the equal-VERSION refusal (exit 3) counts only
+  synced files that exist locally and differ. A file missing locally is new
+  and is applied at any VERSION; the refusal's message names only the
+  differing files. The refusal does not run on the self-update re-exec,
+  whose first pass already saw the bump: a newly listed path a project
+  held in another form is shown, prompted for and applied there.
+  *Cost: the self-update re-exec runs after the first pass has brought
+  VERSION level with upstream. When a release lengthens `SYNCED`, the new
+  copy saw equal VERSIONs and the added paths as "differing", exited 3 and
+  applied nothing, leaving the project between two versions: one project's
+  sync to v1.12.0 applied seven files and never received `bin/scaffold-doc-check`
+  or the three planning templates, and every project syncing from v1.11.0
+  would have met the same. The migration path, an existing project at the
+  previous release, had no test; `tests/test-template-delivery` case 13 is
+  that test, recorded failing before the fix in
+  `tests/fixtures/scaffold-update-reexec-before-fix.txt`.*
+
 ## 1.12.0
 
 **Upgrade note: after this sync, the next closeout's checks report every
@@ -311,10 +352,10 @@ cases. Anything that runs it and reads the exit code now sees the real result.
 ## 1.8.0
 
 - `bin/scaffold-update`: new files are diffed against `/dev/null` so their full content prints during review; `fetch()` keeps stderr instead of discarding it, and a failed fetch no longer claims the file is "not present upstream"; the script prints its **target** directory and remote URL before anything else.
-  *Cost, three defects in one file. Manna-Solutions-llc's first install printed seven empty `=== ` sections and then asked `[y/N]` -- seven files approved with none of their content on screen, because `diff -u "$f"` against a file that does not exist yet errors and `2>/dev/null || true` swallowed both the error and the silence. `fetch()` had the same suppression on both the gh and curl paths, so an auth failure printed an assertion about upstream's contents that the script had no evidence for. And a stray shell prompt in a paste sent this script into an unidentified repo, where it listed six governance files and offered to overwrite them; what stopped it was a version number in scrollback disagreeing, not any control. The script had announced only where it read from since it was written.*
+  *Cost, three defects in one file. One project's first install printed seven empty `=== ` sections and then asked `[y/N]` -- seven files approved with none of their content on screen, because `diff -u "$f"` against a file that does not exist yet errors and `2>/dev/null || true` swallowed both the error and the silence. `fetch()` had the same suppression on both the gh and curl paths, so an auth failure printed an assertion about upstream's contents that the script had no evidence for. And a stray shell prompt in a paste sent this script into an unidentified repo, where it listed six governance files and offered to overwrite them; what stopped it was a version number in scrollback disagreeing, not any control. The script had announced only where it read from since it was written.*
 
 - `PROJECT-INSTRUCTIONS.md`, How to respond: the verification-comparison rule now covers a tool's or an agent's **summary** of a check, not only a recalled value.
-  *Cost: a verification `grep` typed at the Claude Code prompt instead of the plain shell. An agent ran it and reported a summary containing a truncating ellipsis; the summary read as confirmation and verified nothing (Manna-Solutions-llc session 001). The same shape appeared twice more in the session that shipped this: `/memory` output was read as proving an import re-reads live when it proves only that the import resolves, and a hand-written patch was checked by re-reading it rather than by running a counter over it -- the re-reading missed what the counter caught in one run.*
+  *Cost: a verification `grep` typed at the Claude Code prompt instead of the plain shell. An agent ran it and reported a summary containing a truncating ellipsis; the summary read as confirmation and verified nothing (that project's session 001). The same shape appeared twice more in the session that shipped this: `/memory` output was read as proving an import re-reads live when it proves only that the import resolves, and a hand-written patch was checked by re-reading it rather than by running a counter over it -- the re-reading missed what the counter caught in one run.*
 
 - `PROJECT-INSTRUCTIONS.md`, The document set: names `SECURITY-POSTURE.md` and corrects the count.
   *Cost: the section said "four governance documents at repo root" and then listed five, omitting a sixth that `SYNCED` installs. Its ownership -- upstream-owned and overwritten, or project-local -- was determinable only by reading the sync script, while every other installed file's ownership was stated.*
