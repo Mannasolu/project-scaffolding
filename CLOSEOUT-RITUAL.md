@@ -110,9 +110,9 @@ several specific corrections usually collapse into one general principle.
    was caught by the export's own leak guard only because someone ran the check
    by hand. Nothing triggers it.*
 7. **Before ending, write the "Opening the next chat" block at the end of the
-   handoff brief:** the single next step, the command that prints the three
-   profiles and their digest, the command that prints the brief with a fresh
-   digest, and the first message to paste, including the digest comparison.
+   handoff brief, from the template:** route A, the Claude Code opening, and
+   route B, the claude.ai chat with the commands that print the profiles, the
+   digest and the brief, and the first message to paste.
    Add any opening check the operator profile names. The next session opens
    from that block with no guessing. A start-of-session step belongs at the
    end of the document the closeout already writes.
@@ -126,9 +126,9 @@ several specific corrections usually collapse into one general principle.
    written. *Cost: a closeout named its own next session, then added that
    another project would serve the objective better; the same brief was read
    two ways in two chats.*
-8. **Last: re-paste the Instructions field.** Required, not an open item --
-   see below. This is deliberately the final step in this list so it cannot
-   be buried under whatever comes after it.
+8. **Last, for a claude.ai session: re-paste the Instructions field.**
+   Required, not an open item -- see below. A Claude Code session has no
+   field; its closeout says so in one line.
 
 ## The commit pattern
 
@@ -142,6 +142,10 @@ bin/scaffold-brief-check && git commit -m "session NNN: handoff brief" && git pu
 ```
 
 ## The required last step: re-paste the Instructions field
+
+This step belongs to a claude.ai session, whose Instructions field is a copy.
+A Claude Code session reads the three files live through `CLAUDE.md` and has
+no field to paste; its closeout says so in one line.
 
 **This is not an open item, and it does not get logged for later.** It has
 already been identified and skipped across multiple consecutive sessions --

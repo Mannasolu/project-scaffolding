@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook: refuse every prompt while the opening's verdict is
+# not "open". Exit 2 blocks the prompt; stderr is the message shown to you.
+# The verdict is the one .claude/hooks/session-start wrote for this repo,
+# named by the basename of CLAUDE_PROJECT_DIR, which Claude Code sets for
+# every hook command. A missing or unreadable verdict is a refusal, and so
+# is an unset CLAUDE_PROJECT_DIR: a gate that cannot decide stays shut.
+if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
+  echo "Session gate -- CLAUDE_PROJECT_DIR is not set. Fix it in your terminal, then /exit and start claude again." >&2
+  exit 2
+fi
+V="${XDG_STATE_HOME:-$HOME/.local/state}/scaffolding/$(basename "$CLAUDE_PROJECT_DIR").verdict"
+read -r verdict 2>/dev/null < "$V" || verdict="blocked: no verdict -- the opening never ran"
+case "$verdict" in open:*) exit 0 ;; esac
+echo "Session gate -- ${verdict}. Fix it in your terminal, then /exit and start claude again." >&2
+exit 2

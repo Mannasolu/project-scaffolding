@@ -143,10 +143,14 @@ fi
 # ----------------------------------------------------------------- objective
 
 # Print the paragraph that starts at **OBJECTIVE:**, blockquote markers
-# stripped, lines joined, whitespace collapsed. Empty if there is none.
+# stripped, a trailing template marker stripped from each line (the marker is
+# template-only: a marker left in a filled document is bin/scaffold-doc-check's
+# finding, not a paraphrase here -- amendment 039), lines joined, whitespace
+# collapsed. Empty if there is none.
 extract_objective() {
   awk '
     { line = $0; sub(/^[[:space:]]*>[[:space:]]?/, "", line) }
+    { sub(/[[:space:]]*<!-- required -->[[:space:]]*$/, "", line) }
     !found && index(line, "**OBJECTIVE:**") { found = 1; line = substr(line, index(line, "**OBJECTIVE:**")) }
     found { if (line ~ /^[[:space:]]*$/) exit; print line }
   ' "$1" | tr '\n' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'

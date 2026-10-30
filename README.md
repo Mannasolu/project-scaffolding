@@ -24,7 +24,9 @@ across any project, in any domain.
 3. Fill in `PROJECT-PROFILE.md` -- what this project is and any rules specific
    to its domain.
 4. Paste all three of `PROJECT-INSTRUCTIONS.md`, `OPERATOR-PROFILE.md`, and
-   `PROJECT-PROFILE.md` into your AI project's Instructions field.
+   `PROJECT-PROFILE.md` into your AI project's Instructions field. A Claude
+   Code session in the repo reads them through `CLAUDE.md` and needs no
+   paste.
 5. Fill in `docs/planning/master-plan.md` -- even rough. It's the "what and why."
 6. Start working. Run the **closeout ritual** (`CLOSEOUT-RITUAL.md`) at every
    stopping point so progress commits durably instead of evaporating.
@@ -43,6 +45,8 @@ PROJECT-INSTRUCTIONS.md    -- the method. Upstream-owned; do not hand-edit
 OPERATOR-PROFILE.md        -- how YOU work. Yours; carry it between projects
 PROJECT-PROFILE.md         -- purpose, subject, domain rules. This project only
 CLOSEOUT-RITUAL.md         -- the end-of-session discipline
+CLAUDE.md                  -- Claude Code's instructions file. Synced
+.claude/hooks/             -- the opening hook and gate. Synced; registered by your own .claude/settings.json
 WORKING-AGREEMENT.md       -- this project's log of corrections
 CHANGELOG.md / VERSION     -- what changed upstream, and which version you're on
 bin/scaffold-update        -- pull newer method files from upstream

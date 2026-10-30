@@ -6,6 +6,83 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.13.0
+
+**Upgrade note: after the sync, write `.claude/settings.json` by hand.**
+The sync delivers two hook scripts and `CLAUDE.md`; the settings file
+registers the hooks and is each project's own, never synced, because it
+names the reader the operator runs. Copy the block from the header of
+`.claude/hooks/session-start`, with `--reader "<path to your reader>"` or
+`--no-reader` for a project with none, into `.claude/settings.json`, and
+start the next session with `claude` in the repo and the one word `start`.
+Until the file exists the hooks are present and unregistered, and a session
+opens as before this release, with no report. A claude.ai Project's
+Instructions field is re-pasted as before, since PROJECT-INSTRUCTIONS.md
+changed; a Claude Code session reads the file live and needs no paste.
+
+- `.claude/hooks/session-start` and `.claude/hooks/prompt-gate` (new, synced):
+  a `SessionStart` hook prints the repo state, a bounded fetch and the
+  reader's report into the session before the first prompt, and writes a
+  verdict; a `UserPromptSubmit` gate refuses every prompt while that verdict
+  is not open. The repo name is the directory's basename, from
+  `CLAUDE_PROJECT_DIR`; the reader is an argument in the project's own
+  settings file (`--reader <path>` or `--no-reader`), never an environment
+  variable. A hook registered with neither, both, or a path-less `--reader`
+  blocks the gate: a gate that cannot decide stays shut.
+  *Cost: the first hook named one repo and its reader by hand, so it could
+  be neither synced nor exported, and every other project opened with no
+  report; a variable naming the reader could redirect the opening from
+  outside the repo.*
+- `CLAUDE.md` (new, synced): Claude Code's instructions file. It imports
+  PROJECT-INSTRUCTIONS.md, PROJECT-PROFILE.md and the handoff brief, so a
+  session in the repo reads them live; the operator profile is imported by
+  the user-level `~/.claude/CLAUDE.md` on the machine that carries it.
+  *Cost: a per-repo copy of a file with nothing repo-specific in it is a
+  hand step in every project at every change.*
+- `bin/scaffold-update`: `SYNCED` lists the two hooks and `CLAUDE.md`; the
+  executable-bit loop covers `.claude/hooks/*` as well as `bin/*`; the
+  reminder printed when PROJECT-INSTRUCTIONS.md changed addresses a
+  claude.ai Project and says a Claude Code session needs no paste.
+  *Cost: a synced script that arrives without its executable bit exits 126
+  from every hook registration, and nothing said which sessions the paste
+  is for.*
+- `docs/planning/handoff-brief-TEMPLATE.md`: the opening block carries route
+  A, the Claude Code opening (`cd ~/<project> && claude --model <model>`,
+  then `start`), and route B, the claude.ai chat, with the step 1 and step 4
+  text unchanged.
+  *Cost: a brief that described only the chat route sent a Claude Code
+  session to run a paste that has no field.*
+- `PROJECT-INSTRUCTIONS.md`: "The document set" names `CLAUDE.md` and the
+  two hooks; a "Claude Code sessions" section carries what a session does
+  at its opening and on a first message of `start`; the re-paste step is
+  scoped to a claude.ai session. Two rules promoted to tier 3: "A guard
+  nests what it protects" (a `;` after a guarded step ends the guard), and,
+  under "A check reports what it observed", a run proves its output is its
+  own by a mark written last and dated inside the run, not by its exit
+  code.
+  *Cost: a hand-over command whose guard would have printed its stop line
+  and pushed anyway, caught by a reader before it ran; a supervisor's
+  timeout exit read as a normal result, so an earlier report passed as the
+  run's own.*
+- `CLOSEOUT-RITUAL.md`: step 7 writes both routes from the template; step 8
+  and "The required last step" are scoped to a claude.ai session.
+  `SECURITY-POSTURE.md`: the unattended-reader rule names "a hook that fires
+  with no person at the keyboard", so the session-opening hook, started by
+  the operator, is read as attended.
+- `bin/scaffold-doc-check`: a line of a filled planning document that still
+  ends with `<!-- required -->` is a defect, one finding per line, naming the
+  file and line; the field and section judgments still run on the line with
+  the marker removed. `bin/scaffold-brief-check`: the objective comparison
+  strips a trailing marker from each line of the OBJECTIVE paragraph on both
+  sides, so a marker is reported once, by doc-check, and never as a
+  paraphrase.
+  *Cost: one project's brief commit failed on a marker left on the OBJECTIVE
+  line, which brief-check read as part of the OBJECTIVE while doc-check
+  said nothing.*
+- `README.md`: "What's inside" lists `CLAUDE.md` and `.claude/hooks/`; quick
+  start step 4 says a Claude Code session reads the three files through
+  `CLAUDE.md` and needs no paste.
+
 ## 1.12.2
 
 - `bin/scaffold-update`: two comment lines no longer name a downstream

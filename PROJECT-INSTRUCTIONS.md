@@ -104,7 +104,12 @@ discarding stderr on an untested path destroys the only evidence separating
 "found nothing" from "never ran." A check reads the status of the command it
 checks, never a pipeline's last. A freshness check bounds age on both sides:
 a time too old fails, and so does one too far in the future, because a
-future time reads as fresh for as long as it stays ahead.
+future time reads as fresh for as long as it stays ahead. A run proves its
+output is its own by a mark written last and dated inside the run, not by its
+exit code: a supervisor's timeout can share an exit code with a normal result,
+so the reader checks that the run's last write is dated between the run's
+start and now, and treats a timeout as a failure even when another run wrote
+inside the window.
 
 **A test proves it can fail, and proves what it exercised.** Run a new test or
 control first against a synthetic reproduction of the failure it exists to
@@ -135,6 +140,11 @@ the mechanism; a control does. A prohibition in an agent's prompt is not a
 control; the deny rule behind it is. A restriction on an agent is proven by
 running a real agent and reading its transcript, with positive controls; a
 text-matching deny rule is not a boundary.
+
+**A guard nests what it protects.** In a command chain, the steps a guard
+protects run inside it: in `if`/`then`, or in one unbroken `&&` chain. A `;`
+after the guarded step ends the guard: the failure prints and the later steps
+run anyway.
 
 **Read what governs a document before writing or ruling under it.** The
 template before a spec, the cited ADRs before a governance file, the prior
@@ -178,15 +188,42 @@ is lost.
   resolve against nothing and are free to drift; repo filenames are not.
 - **State the destination path**, not just the filename.
 
+## Claude Code sessions
+
+A working session may run in Claude Code inside the repo. There the opening
+has already run before the first prompt: `.claude/hooks/session-start`
+printed the repo state, the fetch and the reader's report into context, and
+`.claude/hooks/prompt-gate` refuses every prompt while that opening is
+blocked. Judge the report before any work. The brief's "Opening the next
+chat" block is for a claude.ai chat (its route B); do not run it in Claude
+Code.
+
+**The first message.** The operator's first message may be only `start`.
+Take it as: this is the session named in the brief's "Opening the next chat
+--" heading. Judge the opening's report first, then begin the brief's
+"Single next step", within its "Order of work across projects". Say in one
+line which session and which step you are taking, then do it. Do not ask
+what to do; the brief says.
+
+**Who does what.** Reads, checks and suites are the agent's. Commits and
+pushes are handed over to the operator as one command each, machine
+labelled, unless the operator profile says otherwise.
+
 ## The document set
 
-Six governance documents at repo root, plus README.md; project content under
-`docs/`.
+Six governance documents at repo root, plus README.md and CLAUDE.md; project
+content under `docs/`.
 
 **Root -- how you work:**
 PROJECT-INSTRUCTIONS.md, CLOSEOUT-RITUAL.md, and SECURITY-POSTURE.md
 (upstream-owned, synced), OPERATOR-PROFILE.md and PROJECT-PROFILE.md (yours,
-never synced), WORKING-AGREEMENT.md (this project's correction log), README.md
+never synced), WORKING-AGREEMENT.md (this project's correction log), README.md,
+CLAUDE.md (upstream-owned, synced: Claude Code's instructions file; it imports
+PROJECT-INSTRUCTIONS.md, PROJECT-PROFILE.md and the brief, so a session in the
+repo reads them live). The opening hook and its gate,
+`.claude/hooks/session-start` and `.claude/hooks/prompt-gate`, are
+upstream-owned and synced; the project's own `.claude/settings.json` registers
+them and is never synced.
 
 **Templates under `docs/` -- upstream-owned, synced, at the same path in
 every project:** `docs/planning/handoff-brief-TEMPLATE.md`,
@@ -318,11 +355,14 @@ clearly general), and a one-line summary. Then commit, behind
 next step so the next session opens with no guessing.
 
 **Required last step, not an open item: re-paste the Instructions field.**
-Hand over the command that prints all three files -- this one,
-OPERATOR-PROFILE.md, PROJECT-PROFILE.md -- and their digest, as
-CLOSEOUT-RITUAL.md gives it; never the assistant's own reproduction of their
-text. State plainly that the session is not closed until the output is
-pasted. No tool can do this step: the Instructions field has no API, so
-`bin/scaffold-freshness` cannot see this hop. It has been skipped across
-multiple sessions precisely because it felt optional when logged as a
-carryover instead of demanded as the last thing the ritual asks for.
+This step belongs to a claude.ai session, whose Instructions field is a copy.
+A Claude Code session reads the three files live through `CLAUDE.md` and has
+no field to paste; its closeout says so in one line. Hand over the command
+that prints all three files -- this one, OPERATOR-PROFILE.md,
+PROJECT-PROFILE.md -- and their digest, as CLOSEOUT-RITUAL.md gives it; never
+the assistant's own reproduction of their text. State plainly that the
+session is not closed until the output is pasted. No tool can do this step:
+the Instructions field has no API, so `bin/scaffold-freshness` cannot see
+this hop. It has been skipped across multiple sessions precisely because it
+felt optional when logged as a carryover instead of demanded as the last
+thing the ritual asks for.

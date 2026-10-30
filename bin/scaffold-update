@@ -49,6 +49,9 @@ SYNCED=(
   bin/scaffold-freshness
   bin/scaffold-brief-check
   bin/scaffold-doc-check
+  .claude/hooks/session-start
+  .claude/hooks/prompt-gate
+  CLAUDE.md
   docs/specs/component-spec-TEMPLATE.md
   docs/decisions/adr-TEMPLATE.md
   docs/session-logs/session-log-000-TEMPLATE.md
@@ -326,7 +329,7 @@ case "$reply" in
     # a script was added to SYNCED (bin/scaffold-brief-check, scaffolding
     # session 023). No error suppression -- a chmod that fails should say so.
     for f in "${SYNCED[@]}"; do
-      case "$f" in bin/*) [ -f "$f" ] && chmod +x "$f" ;; esac
+      case "$f" in bin/*|.claude/hooks/*) [ -f "$f" ] && chmod +x "$f" ;; esac
     done
     # The reminder fires only when the file it is about changed; one that fired
     # on every run trained people to skip it. The command line below must match
@@ -334,12 +337,13 @@ case "$reply" in
     if in_changed PROJECT-INSTRUCTIONS.md; then
       echo
       cat <<'EOF'
-PROJECT-INSTRUCTIONS.md changed. Re-paste the Instructions field: print the
-three files and their digest with
+PROJECT-INSTRUCTIONS.md changed. If this project has a claude.ai Project,
+re-paste its Instructions field: print the three files and their digest with
 
     cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md && printf '\ninstructions-digest: %s\n' "$(cat PROJECT-INSTRUCTIONS.md OPERATOR-PROFILE.md PROJECT-PROFILE.md | sha256sum | cut -d' ' -f1)"
 
-and paste the output, replacing what is there.
+and paste the output, replacing what is there. A Claude Code session in the
+repo reads the file live through CLAUDE.md and needs no paste.
 EOF
     fi
     # Self-update: the apply loop above iterated this process's SYNCED -- the

@@ -40,6 +40,19 @@ Item numbers are kept stable across sessions.
 
 ## Opening the next chat -- [project] session [NNN+1] <!-- required -->
 
+**Route A -- Claude Code.** In your terminal, `cd ~/[project] && git status -sb`
+prints one line, `## main...origin/main`; anything more is committed first.
+Then:
+
+    cd ~/[project] && claude --model [model]
+
+The screen shows the banner and an empty prompt; the opening hook's output
+goes into the session, not onto the screen. Type `start`. The gate refuses
+with a reason while the opening is blocked: fix the cause in your terminal,
+`/exit`, and start again. End with `/exit` after the closeout's last commit.
+
+**Route B -- a claude.ai chat.**
+
 **Project:** [project]
 **Session:** [NNN+1]
 

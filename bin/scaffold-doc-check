@@ -626,6 +626,21 @@ judge_required_section() {
   $hit || finding REQUIRED "$doc" "section \"${match}\" missing"
 }
 
+# judge_markers <doc>: a line of a filled planning document that still ends
+# with the template marker is a defect, one finding per line, whatever else
+# the line holds (amendment 039: the marker is template-only). The field and
+# section judgments still run on the line with the marker removed, so a
+# half-filled line reports both. Fenced blocks are blanked first, so a
+# document quoting a marked template line is not caught.
+judge_markers() {
+  local doc="$1" m
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    echo "  REQUIRED ${doc}:${m%%:*} carries the template marker -- the marker is template-only; remove it"
+    defects=$((defects + 1))
+  done <<< "$(grep -nE "${MARKER}[[:space:]]*\$" "$(unfenced "$doc")" || true)"
+}
+
 # check_required <doc> <template>
 check_required() {
   local doc="$1" tpl="$2" marked m ln text label tval match mode bad="" summary=""
@@ -661,6 +676,7 @@ check_required() {
   if [ ! -f "$doc" ]; then echo "  absent   ${doc}"; n_absent=$((n_absent + 1)); return; fi
   echo "  checked  ${doc}"
   n_req_checked=$((n_req_checked + 1))
+  judge_markers "$doc"
   local i
   for i in "${!kinds[@]}"; do
     if [ "${kinds[$i]}" = field ]; then judge_required_field "$doc" "${labels[$i]}" "${tvals[$i]}"

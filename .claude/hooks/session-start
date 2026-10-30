@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# SessionStart hook: the session opening, run by Claude Code instead of
+# pasted by hand. Its stdout goes into Claude's context. It also writes the
+# gate verdict that .claude/hooks/prompt-gate enforces on every prompt.
+#
+# Usage:  session-start --reader <path>
+#         session-start --no-reader
+#
+# The repo is CLAUDE_PROJECT_DIR, which Claude Code sets for every hook
+# command. Its basename is the repo's name -- under the method's filesystem
+# convention (~/<repo-name>/, one directory per remote, name matching the
+# remote) it is the name a reader registers. Unset or empty, the hook
+# prints its reason to stderr and exits 1 before writing anything; the gate
+# then finds no verdict and refuses.
+#
+# --reader <path> runs the operator's reader as `<path> --sweep --repo
+# <repo>`. The gate opens only on a reader exit the allowlist names -- 0
+# (clean), 1 (findings) or 2 (unknowns) -- after a clean fetch with nothing
+# behind upstream. Every other outcome blocks: a failed fetch, a branch
+# behind its upstream, and any other reader exit, named where the reader's
+# contract names it (3: this opening's sweep produced no report of its own;
+# 64: usage, this repo is not registered with the reader, or wrong home
+# until the reader moves that to 78; 78: wrong home; 126 and 127: the
+# reader is not executable or not found) and as "unnamed" otherwise.
+#
+# --no-reader is for a repo with no reader, such as one started from the
+# public export: the reader step prints "none configured" and the gate
+# opens on the fetch alone.
+#
+# Neither flag, both flags, an unknown argument, or --reader with no path
+# blocks the gate with "no reader configured": a gate that cannot decide
+# stays shut. No environment variable names the reader; the argument in
+# the project's own .claude/settings.json does.
+#
+# The verdict is written "blocked" first, so a hook that dies or times out
+# leaves the gate shut (scaffolding items 86 and 87). The reader bounds its
+# own sweep, so it gets no outer timeout; the fetch is bounded here.
+#
+# Registration, in the project's .claude/settings.json (never synced: the
+# reader's path is the operator's). With a reader, replace --no-reader by
+# --reader "<path>":
+#
+#   "hooks": {
+#     "SessionStart": [
+#       {
+#         "matcher": "startup|resume|clear",
+#         "hooks": [
+#           {
+#             "type": "command",
+#             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start --no-reader",
+#             "timeout": 420
+#           }
+#         ]
+#       }
+#     ],
+#     "UserPromptSubmit": [
+#       {
+#         "hooks": [
+#           {
+#             "type": "command",
+#             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/prompt-gate"
+#           }
+#         ]
+#       }
+#     ]
+#   }
+set -uo pipefail
+
+if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
+  echo "session-start: CLAUDE_PROJECT_DIR is not set" >&2
+  exit 1
+fi
+REPO="$(basename "$CLAUDE_PROJECT_DIR")"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/scaffolding"
+VERDICT="${STATE}/${REPO}.verdict"
+mkdir -p "$STATE" || exit 1
+echo "blocked: the opening did not finish" > "$VERDICT"
+
+# Exactly one of --reader <path>, --no-reader. Anything else is "bad".
+MODE=""; READER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reader)
+      if [ -n "$MODE" ] || [ $# -lt 2 ]; then MODE=bad; break; fi
+      case "$2" in ""|--*) MODE=bad; break ;; esac
+      MODE=reader; READER="$2"; shift 2 ;;
+    --no-reader)
+      if [ -n "$MODE" ]; then MODE=bad; break; fi
+      MODE=none; shift ;;
+    *) MODE=bad; break ;;
+  esac
+done
+
+cd "$CLAUDE_PROJECT_DIR" || exit 1
+
+echo "== repo"
+git status -sb | head -1
+git log --oneline -1
+
+echo "== fetch"
+timeout 60 git fetch --quiet; fetch=$?
+echo "fetch exit: ${fetch} (124 is a timeout)"
+behind=$(git rev-list --count HEAD..@{u} 2>&1); echo "behind upstream: ${behind}"
+
+m=""; why=""
+case "$MODE" in
+  reader)
+    echo "== reader"
+    "$READER" --sweep --repo "$REPO"; m=$?
+    echo "reader exit: ${m}"
+    case "$m" in
+      3)       why="this opening's sweep produced no report of its own" ;;
+      64)      why="usage, this repo is not registered with the reader, or wrong home until the reader moves that to 78" ;;
+      78)      why="wrong home" ;;
+      126|127) why="the reader ${READER} is not executable or not found" ;;
+      0|1|2)   why="" ;;
+      *)       why="unnamed exit" ;;
+    esac ;;
+  none) echo "== reader: none configured (--no-reader)" ;;
+  *)    echo "== reader: not configured" ;;
+esac
+
+if   [ "$MODE" = bad ] || [ -z "$MODE" ]; then v="blocked: no reader configured -- register the hook with --reader <path> or --no-reader in .claude/settings.json"
+elif [ "$fetch" -ne 0 ];  then v="blocked: git fetch exit ${fetch}"
+elif [ "$behind" != 0 ];  then v="blocked: behind upstream (${behind}) -- run git pull in your terminal"
+elif [ -n "$why" ];       then v="blocked: reader exit ${m} -- ${why}"
+elif [ "$MODE" = none ];  then v="open: no reader"
+else                           v="open: reader exit ${m}"
+fi
+echo "$v" > "$VERDICT"
+echo "== gate: ${v}"
+exit 0

@@ -116,8 +116,9 @@ ADR-005.
 
 ## An unattended reader runs under its own credential
 
-A reader that runs unattended -- a scheduled sweep, a hook, anything that
-calls a remote with no person at the keyboard -- runs under its own
+A reader that runs unattended -- a scheduled sweep, a hook that fires with
+no person at the keyboard, anything that calls a remote unattended -- runs
+under its own
 least-privilege credential, never the operator's login, and it reports its
 credential's expiry before that expiry makes it fail. The credential's scope
 is read from the reader's code, every call on its path enumerated, not from
