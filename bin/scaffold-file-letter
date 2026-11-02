@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# File an inbound letter from a sibling repository's HEAD, byte for byte,
+# checked by hash (docs/specs/scaffold-file-letter.md; ADR-009, ADR-014).
+#
+# A letter between projects is filed at the recipient under the sender's
+# filename, only once it exists at the sender's HEAD, and never overwrites a
+# different file already under that name. Done by hand the step has gone
+# wrong in exactly those two ways: a letter filed before it was committed at
+# the sender, and a same-name collision. This command cannot skip either
+# check. It reads the sender's HEAD, refuses every state ADR-014 names,
+# writes the bytes under docs/correspondence/ here, and prints both hashes.
+# The commit is the operator's.
+#
+# Usage: bin/scaffold-file-letter <sender>/<basename> [<sender>/<basename> ...]
+#
+#   <sender>    the sender repository's directory name, a sibling of this
+#               repository under the same parent directory (the token the
+#               reader's report prints before the colon)
+#   <basename>  the letter's filename under docs/correspondence/ at the sender
+#
+# SCAFFOLD_LETTER_ROOT  (tests only) the directory under which <sender> is
+#                       looked up; default: the parent of this repo's top level
+#
+# Output: `repo:` first, then six lines per argument (letter, sender, sha256
+# of the sender's HEAD bytes, filed path, sha256 read back from disk, result),
+# then a summary and one `to commit:` line per filed letter.
+#
+# Exit codes (several arguments: each judged alone, the worst wins):
+#   0  every argument was filed, or was already filed with identical content
+#   1  at least one argument was refused, or malformed, or none was given
+#   2  no refusal, but at least one argument could not be read: no sender
+#      clone, a git command failed, the write or the read-back failed
+#
+# The sender is only ever read. No stderr is discarded: a git error is
+# evidence. The script names no project, person or machine; it ships to the
+# public export under its leak guard.
+set -uo pipefail
+export GIT_OPTIONAL_LOCKS=0
+
+usage() {
+  echo "usage: bin/scaffold-file-letter <sender>/<basename> [<sender>/<basename> ...]"
+  echo "  files docs/correspondence/<basename> here from <sender>'s HEAD, checked by hash;"
+  echo "  <sender> is a sibling repository's directory name, as the reader's report prints it."
+  echo "  exit 0 filed or already filed; 1 refused or malformed; 2 could not read."
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") usage; exit 1 ;;
+esac
+
+SENDER_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+BASE_RE='^[A-Za-z0-9][A-Za-z0-9._-]*\.md$'
+# the current letter-name form: <YYYY-MM-DD>T<HHMMSS>-<from>--to--<to>.md
+NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}-(.+)--to--(.+)\.md$'
+
+# Step 2: this repo. Not inside a repository is could not read for the run.
+if ! R="$(git rev-parse --show-toplevel)"; then
+  echo "repo:     (not inside a git repository)"
+  echo "result:   COULD NOT READ -- not inside a git repository; nothing processed"
+  exit 2
+fi
+THIS="$(basename "$R")"
+ROOT="${SCAFFOLD_LETTER_ROOT:-$(dirname "$R")}"
+echo "repo:     ${R}"
+
+N_FILED=0; N_ALREADY=0; N_REFUSED=0; N_UNREAD=0
+TO_COMMIT=()
+
+hash_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+# sender_clean <S> <path>: the sender's working copy and index of the letter
+# both equal HEAD there. Returns 0 clean, 1 differing, 2 a git failure. Two
+# diffs: the working tree against HEAD misses a change that is staged while
+# the working tree is back at HEAD's bytes (git status prints `MM`).
+sender_clean() {
+  local rc
+  git -C "$1" diff --quiet HEAD -- "$2"; rc=$?
+  [ "$rc" -le 1 ] || return 2
+  [ "$rc" -eq 0 ] || return 1
+  git -C "$1" diff --quiet --cached HEAD -- "$2"; rc=$?
+  [ "$rc" -le 1 ] || return 2
+  return "$rc"
+}
+
+# print_block <sender line> <sha256 1> <filed line> <sha256 2> <result>
+print_block() {
+  echo "sender:   $1"
+  echo "sha256:   $2"
+  echo "filed:    $3"
+  echo "sha256:   $4"
+  echo "result:   $5"
+}
+
+file_one() {
+  local arg="$1"
+  local sender base path S top entry err errtext rc commit from to hash1 hash2 existing_hash other f tmp dest note=""
+  local sender_line="(not read)" hash1_line="(not read)" filed_line="(nothing written)" hash2_line="(nothing written)"
+  echo "letter:   ${arg}"
+
+  # Step 1: parse at the first slash; either half failing its pattern, or a
+  # second slash, is malformed.
+  sender="${arg%%/*}"; base="${arg#*/}"
+  # SENDER_RE's first character class also rejects `.` and `..`
+  if [ "$sender" = "$arg" ] || [[ "$base" == */* ]] || ! [[ "$sender" =~ $SENDER_RE ]] || ! [[ "$base" =~ $BASE_RE ]]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- malformed argument, expected <sender>/<basename>"
+    N_REFUSED=$((N_REFUSED + 1)); return
+  fi
+  path="docs/correspondence/${base}"
+
+  # Step 3: not self.
+  if [ "$sender" = "$THIS" ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- ${sender} is this repo; a letter from here is filed at its recipient"
+    N_REFUSED=$((N_REFUSED + 1)); return
+  fi
+
+  # Step 4: the sender clone, the top of its own repository.
+  S="${ROOT}/${sender}"
+  if [ ! -d "$S" ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- no clone at ${S}"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  if ! top="$(git -C "$S" rev-parse --show-toplevel)" || [ "$top" != "$(readlink -f "$S")" ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- ${S} is not the top of a git repository"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+
+  # Step 5: at the sender's HEAD. Exit 0 with empty output is "not at HEAD";
+  # a non-zero exit is a failure to read, named with git's text.
+  # -z is the machine form; its NUL is dropped here because only emptiness
+  # and git's own status are read from it. stderr is kept apart, so a
+  # warning on exit 0 cannot make an absent path read as present.
+  err="$(mktemp)"
+  entry="$(git -C "$S" ls-tree -z HEAD -- "$path" 2>"$err" | tr -d '\0'; exit "${PIPESTATUS[0]}")"; rc=$?
+  errtext="$(cat "$err")"; rm -f "$err"
+  [ -z "$errtext" ] || printf '%s\n' "$errtext" >&2
+  if [ "$rc" -ne 0 ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- git ls-tree in ${S} exited ${rc}: ${errtext}"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  if [ -z "$entry" ]; then
+    print_block "${S} (path not at HEAD)" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- not at ${sender}'s HEAD; a letter is filed only once it is committed there, and a clone behind its origin pulls first"
+    N_REFUSED=$((N_REFUSED + 1)); return
+  fi
+
+  # Step 8, read here as soon as step 5 passes, so a refusal at step 6 or
+  # 7 still prints the hash (section 3's table): the bytes, hashed once
+  # from the sender's HEAD. git show's own status is read, never the
+  # pipeline's last: a failed git show piped to sha256sum prints the empty
+  # input's hash and the pipeline exits 0.
+  hash1="$(git -C "$S" show "HEAD:${path}" | sha256sum | cut -d' ' -f1; exit "${PIPESTATUS[0]}")"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- git show HEAD:${path} in ${S} exited ${rc}"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  hash1_line="$hash1"
+
+  # Step 6: the sender's working copy and index equal HEAD there.
+  sender_clean "$S" "$path"; rc=$?
+  if [ "$rc" -eq 2 ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- git diff in ${S} failed"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  if ! commit="$(git -C "$S" log -1 --format='%h (%ad)' --date=short -- "$path")"; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- git log in ${S} failed"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  sender_line="${S} at ${commit}"
+  if [ "$rc" -eq 1 ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- ${sender}'s working copy or index of the letter differs from its HEAD; the letter is being revised there"
+    N_REFUSED=$((N_REFUSED + 1)); return
+  fi
+
+  # Step 7: addressed here, when the name is in the current form.
+  if [[ "$base" =~ $NAME_RE ]]; then
+    from="${BASH_REMATCH[1]}"; to="${BASH_REMATCH[2]}"
+    if [ "$from" != "$sender" ] || [ "$to" != "$THIS" ]; then
+      print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- addressed ${from} to ${to}; this is ${THIS}, the sender is ${sender}"
+      N_REFUSED=$((N_REFUSED + 1)); return
+    fi
+  else
+    note=" (earlier name form; addressee not checked)"
+  fi
+
+  # Step 9: already here, under this name or under another.
+  dest="${R}/${path}"
+  if [ -e "$dest" ] && [ ! -f "$dest" ]; then
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- ${path} exists here and is not a regular file"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  if [ -e "$dest" ]; then
+    if ! existing_hash="$(hash_of "$dest")"; then
+      print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- could not hash the file already at ${path}"
+      N_UNREAD=$((N_UNREAD + 1)); return
+    fi
+    if [ "$existing_hash" != "$hash1" ]; then
+      print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "REFUSED -- a different file is already filed under this name (sha256 ${existing_hash}); filing never overwrites -- this is a same-name finding, and a correction is a new letter"
+      N_REFUSED=$((N_REFUSED + 1)); return
+    fi
+    print_block "$sender_line" "$hash1_line" "(nothing written; identical bytes already at ${path})" "$existing_hash" "already filed, identical${note}"
+    N_ALREADY=$((N_ALREADY + 1)); return
+  fi
+  if [ -d "${R}/docs/correspondence" ]; then
+    for f in "${R}"/docs/correspondence/*; do
+      [ -f "$f" ] || continue
+      case "$(basename "$f")" in .*) continue ;; esac
+      if [ "$(hash_of "$f")" = "$hash1" ]; then
+        other="docs/correspondence/$(basename "$f")"
+        print_block "$sender_line" "$hash1_line" "(nothing written; identical bytes already at ${other})" "$(hash_of "$f")" "already filed as ${other}${note}"
+        N_ALREADY=$((N_ALREADY + 1)); return
+      fi
+    done
+  fi
+
+  # 4.3 Write: a second read of the blob to a temporary name beside the
+  # destination, compared to the first read's hash, then linked into place.
+  mkdir -p "${R}/docs/correspondence" || {
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- could not create ${R}/docs/correspondence"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  }
+  tmp="${R}/docs/correspondence/.${base}.tmp.$$"
+  git -C "$S" show "HEAD:${path}" > "$tmp"; rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(hash_of "$tmp")" != "$hash1" ]; then
+    hash2="$(hash_of "$tmp" || echo '(unreadable)')"
+    rm -f "$tmp"
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- the bytes written differ from the sender's HEAD (${hash1} vs ${hash2}; git show exited ${rc})"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  if ! chmod 644 "$tmp"; then
+    rm -f "$tmp"
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- chmod 644 of the temporary file failed"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  # A hard link onto an existing name fails (EEXIST) and is atomic, so a file
+  # that appeared since step 9 is never replaced. mv -n is not used: it exits
+  # 0 and says nothing when it declines to overwrite.
+  if ! ln "$tmp" "$dest"; then
+    rm -f "$tmp"
+    if [ -e "$dest" ]; then
+      print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- a file appeared under this name during the run (${path})"
+    else
+      print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- ln failed writing ${path} (its message is above)"
+    fi
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  rm -f "$tmp"
+  # The second hash is read from the filed path on disk, not from a variable.
+  hash2="$(hash_of "$dest")"
+  if [ "$hash2" != "$hash1" ]; then
+    # the link this run made is removed, so nothing stays under the name
+    rm -f "$dest"
+    print_block "$sender_line" "$hash1_line" "$filed_line" "$hash2_line" "COULD NOT READ -- the filed bytes differ from the sender's HEAD (${hash1} vs ${hash2}); the file was removed"
+    N_UNREAD=$((N_UNREAD + 1)); return
+  fi
+  print_block "$sender_line" "$hash1_line" "$path" "$hash2" "filed${note}"
+  TO_COMMIT+=("to commit: [ \"\$(sha256sum ${path} | cut -d' ' -f1)\" = \"${hash2}\" ] && git add ${path}")
+  N_FILED=$((N_FILED + 1))
+}
+
+for arg in "$@"; do
+  file_one "$arg"
+done
+
+echo "filed ${N_FILED}, already filed ${N_ALREADY}, refused ${N_REFUSED}, could not read ${N_UNREAD}"
+for line in "${TO_COMMIT[@]+"${TO_COMMIT[@]}"}"; do echo "$line"; done
+
+if [ "$N_REFUSED" -gt 0 ]; then exit 1; fi
+if [ "$N_UNREAD" -gt 0 ]; then exit 2; fi
+exit 0

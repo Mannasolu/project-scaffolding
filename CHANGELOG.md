@@ -6,6 +6,53 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.14.0
+
+**Upgrade note: after the sync, each letter the reader lists under "Letters
+to file here" is filed at the next opening by
+`bin/scaffold-file-letter <sender>/<basename>`, the token as the report
+prints it, before any ruling; the operator commits the file.** Add
+`Bash(bin/scaffold-file-letter *)` to the `allow` list of the project's
+`.claude/settings.json` (the file is each project's own and is not synced),
+so the filing step prompts for nothing: it writes only under
+`docs/correspondence/`, never overwrites, and checks every byte it writes.
+PROJECT-INSTRUCTIONS.md changed, so a claude.ai Project's Instructions field
+is re-pasted; a Claude Code session reads the file live and needs no paste.
+
+- `bin/scaffold-file-letter` (new, synced): files an inbound letter from a
+  sibling repository's HEAD, byte for byte, under the sender's filename.
+  It refuses a letter not yet committed at the sender, a sender whose
+  working copy or index of the letter differs from its HEAD, a letter
+  addressed elsewhere, and a different file already under that name here
+  (filing never overwrites); a letter already here under this or another
+  name is reported, not rewritten. It prints the sender's commit and two
+  hashes, one of the sender's HEAD bytes and one read back from the file
+  written, then a `to commit:` line the operator's shell checks before
+  `git add`. Exit 0 filed or already filed, 1 refused, 2 could not read,
+  counted apart in a summary line. The sender is only read; it does not
+  stage, commit, fetch or pull. `tests/test-file-letter`: 15 cases and a
+  mutation check with four mutants.
+  *Cost: the copy was a courier step by hand or by an agent's `cp`, and
+  the record shows it failing in exactly the two ways the command now
+  refuses: a letter filed before it existed at the sender's HEAD, and a
+  same-name collision. Fifteen unfiled letters stood in one opening's
+  report when the spec was written.*
+- `bin/scaffold-update`: `SYNCED` lists the new script; the executable-bit
+  loop already covers `bin/*`. `tests/test-template-delivery` case 16: a
+  downstream at v1.13.0 receives the script, executable, through the
+  self-update re-exec.
+- `PROJECT-INSTRUCTIONS.md`, "The document set", the `correspondence/`
+  bullet: inbound filing names the command and what it refuses; the rest
+  of the bullet is unchanged. `README.md` and the export's README name the
+  script under `bin/`.
+- `bin/scaffold-init`: the `.claude/settings.json` it writes allows
+  `Bash(bin/scaffold-file-letter *)`; `tests/test-scaffold-init-opening`
+  case 16 reads the entry.
+  *Cost: filing happens at every opening before any ruling, and a prompt
+  per letter would be a prompt for a step with no judgment in it. Cost
+  accepted: an agent can file a letter unasked; the operator's commit
+  remains the gate.*
+
 ## 1.13.0
 
 **Upgrade note: after the sync, write `.claude/settings.json` by hand.**

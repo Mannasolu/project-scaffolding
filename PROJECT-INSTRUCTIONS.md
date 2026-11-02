@@ -250,8 +250,10 @@ from there; a spec or an ADR is held to its template's fields and sections.
   cost accepted.
 - `correspondence/` -- letters between projects. Outbound is committed in
   the same step that writes it, and carried only after. Inbound is filed on
-  receipt, byte for byte, under the sender's filename, and only once it
-  exists at the sender's HEAD (`git -C <sender> log -1 -- <path>`). A
+  receipt by `bin/scaffold-file-letter <sender>/<basename>`, which copies
+  the bytes from the sender's HEAD under the sender's filename, refuses a
+  letter not yet committed there or a different file already under that
+  name here, and prints both hashes; the operator commits the file. A
   letter is named `<YYYY-MM-DD>T<HHMMSS>-<from>--to--<to>.md`: the local
   time it was generated, then the sender's and the recipient's full repo
   names. Every letter carries a **Generated:** line with the full time and

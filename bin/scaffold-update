@@ -49,6 +49,7 @@ SYNCED=(
   bin/scaffold-freshness
   bin/scaffold-brief-check
   bin/scaffold-doc-check
+  bin/scaffold-file-letter
   .claude/hooks/session-start
   .claude/hooks/prompt-gate
   CLAUDE.md
