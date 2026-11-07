@@ -109,7 +109,9 @@ output is its own by a mark written last and dated inside the run, not by its
 exit code: a supervisor's timeout can share an exit code with a normal result,
 so the reader checks that the run's last write is dated between the run's
 start and now, and treats a timeout as a failure even when another run wrote
-inside the window.
+inside the window. A search that found nothing is evidence only within the
+place and time it looked: reported as "none", it reads as a proof of absence,
+so the scope goes with the result.
 
 **A test proves it can fail, and proves what it exercised.** Run a new test or
 control first against a synthetic reproduction of the failure it exists to
@@ -124,7 +126,10 @@ written from the mechanism, read first, and a proof run is done only when
 each case fails for the reason it names. A negative assertion is proven able
 to fire: a helper that reports "absent" may be reporting that it never
 looked, so it gets a positive control whose input is built to make it fire,
-sized past any buffer it reads through.
+sized past any buffer it reads through. A harness whose code or units have a live
+default asserts, at its end, that the live resource is unchanged:
+scratch-by-default is a claim, and one path that misses it writes to production
+while every case passes.
 
 **A control changes the system; it does not police attention.** When an error
 is found, the fix makes it impossible or loud -- a check that fails, a gate

@@ -30,7 +30,11 @@ Read from the repo, not asserted.
 
 ## Open <!-- required -->
 
-Item numbers are kept stable across sessions.
+Item numbers are kept stable across sessions. A number leaves this list only
+on the Closed line, and `bin/scaffold-brief-check` fails a closeout that drops
+one any other way.
+
+Closed this session: <numbers>, or none.
 
 1. **[An open item.]** **Waits on:** [what resolves it].
 

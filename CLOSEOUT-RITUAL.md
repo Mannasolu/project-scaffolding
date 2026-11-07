@@ -92,11 +92,14 @@ several specific corrections usually collapse into one general principle.
    ` -- <note>`. **Before the first commit, `bin/scaffold-doc-check` must
    exit 0.** It holds each new document's header, and each revised spec's,
    to its template; checks that every repo-relative path a living document
-   names resolves; and fails on each required line a planning document
-   lacks. A non-zero exit means fix the document, not the check. **Before the second commit,
+   names resolves; fails on each required line a planning document lacks;
+   and fails on an ADR's `**Review by:**` date that is past, unreadable, or
+   more than 730 days out. A non-zero exit means fix the document, not the check. **Before the second commit,
    `bin/scaffold-brief-check` must exit 0.** It checks that every path the brief cites is tracked, that the
-   OBJECTIVE is quoted verbatim, and that the stamp is well-formed and names a
-   real commit. A non-zero exit means fix the brief, not the check. The commit
+   OBJECTIVE is quoted verbatim, that the stamp is well-formed and names a
+   real commit, and that every numbered open item of the earlier brief is still
+   listed or named on the `Closed this session:` line. A non-zero exit means fix
+   the brief, not the check. The commit
    pattern below chains each check to its commit, so neither commit can land
    without its check.
    *Cost: a downstream closeout wrote its stamp as prose; freshness exited 2 at

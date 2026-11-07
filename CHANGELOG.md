@@ -6,6 +6,58 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.15.0
+
+**Upgrade note: the next closeout where an open item leaves the brief must name
+it on one line in `## Open`:** `Closed this session: <numbers>, or none.`, in
+that form, with or without bold. Any other wording closes nothing, and the
+number is reported MISSING. Open item numbers are identifiers: they stay stable,
+with gaps, and order lives in the brief's order of work, not in the numerals. A
+list renumbered by position fails. An ADR added after this sync carries
+`**Review by:** YYYY-MM-DD`, and a date past it fails closeout. ADRs from before
+it are exempt. PROJECT-INSTRUCTIONS.md and CLOSEOUT-RITUAL.md changed, so a
+claude.ai Project's Instructions field is re-pasted; a Claude Code session reads
+the files live and needs no paste.
+
+- `bin/scaffold-brief-check`: a fifth block compares the brief's numbered open
+  items with the newest commit holding different content, so the verdict is the
+  same before the closeout's commit and after it. A number that left without
+  being on the Closed line is MISSING; a number twice is DUPLICATE; a `Waits on:`
+  naming nothing is EMPTY. A git read that fails after the preflight is now
+  could-not-run, exit 2, reported apart from a defect.
+  *Cost: item numbers were stable by convention only, and an overwritten brief
+  leaves no trace of an item it dropped.*
+- `bin/scaffold-doc-check`: a fourth block judges review dates: past, more than
+  730 days out, or unreadable is a defect, and an ACCEPTED ADR added after the
+  template gained the field must carry one. Upstream, the operator profile's
+  `(review by YYYY-MM-DD)` lines are judged the same way.
+  *Cost: both outside-practice reviews on record happened only because the
+  operator asked.*
+- `bin/scaffold-doc-check --repo <path> <file>...`: checks a component repo's
+  spec from the governing repo's root, with the governing templates and the
+  target's index and waivers, so a component repo carries no template copies.
+  *Cost: a scratch-repo hand procedure, run twice.*
+- Both tools: a path after `<name>'s `, `<name> ` or `~/<name> && `, where
+  `<name>` is a directory beside this repo holding `.git`, resolves in that
+  repo's index and prints ELSEWHERE. A match holding `...` is prose and prints
+  PROSE. Each is counted apart, and neither is a defect. Both tools stop
+  `core.fsmonitor`, so reading a sibling runs none of its configuration.
+  *Cost: three letters' paths dangled or resolved falsely, and two waivers named
+  no file.*
+- `bin/scaffold-doc-check`: a Status saying `commit to follow` is a defect, and a
+  required heading's leading number is not its identity, so `## 9. Open questions
+  queue` satisfies `## 8. Open questions queue`.
+  *Cost: three such Status lines reached the default branch; a project renumbered
+  a master plan to pass.*
+- `docs/decisions/adr-TEMPLATE.md`: `**Review by:**`.
+  `docs/planning/handoff-brief-TEMPLATE.md`: the Closed line's form.
+  `CLOSEOUT-RITUAL.md`: both checks' new work.
+- `PROJECT-INSTRUCTIONS.md`: a search that found nothing reports its scope with
+  the result; a harness with a live default asserts at its end that the live
+  resource is unchanged.
+  *Cost: a restore test's narrow search nearly recorded "no record written"; a
+  unit test wrote into a live alert directory while every case passed.*
+
 ## 1.14.0
 
 **Upgrade note: after the sync, each letter the reader lists under "Letters

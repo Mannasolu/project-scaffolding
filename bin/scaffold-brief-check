@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the handoff brief against the repo it describes. Four checks:
+# Verify the handoff brief against the repo it describes. Five checks:
 #
 #   1. References -- every repo-relative path the brief names is tracked.
 #   2. Objective  -- the brief quotes the OBJECTIVE verbatim from its source.
@@ -7,6 +7,8 @@
 #                    commit that exists in this repo.
 #   4. Session    -- WORKING-AGREEMENT.md has a `## Session <NNN>` heading for
 #                    the session named on the brief's **Written:** line.
+#   5. Continuity -- every numbered item in the earlier brief's ## Open is in
+#                    this one or on its Closed line (ADR-013).
 #
 # Why (1): a session wrote its primary output as a chat heredoc that was never
 # run, then closed with the brief citing that file as done. The next session
@@ -47,16 +49,37 @@
 # carries no master plan) against the same paragraph in the brief. Blockquote
 # markers and line wrapping are ignored; every word must match.
 #
-# Known limit: a path that belongs to another repo (after `cd ~/other && ...`)
-# is checked against this one. Same-named files will resolve falsely.
+# Why (5): item numbers are the brief's identifiers, and nothing held them. A
+# closeout could drop an open item silently, and the overwritten brief left no
+# trace of it. The check compares numbers, not meaning: it does not judge
+# whether an item's prose changed or whether a Waits on: names something real.
+# Spec: docs/specs/check-revision-v1.15.0.md 4.1.
+#
+# Prose and siblings (docs/specs/check-revision-v1.15.0.md 4.3, 4.4): a raw
+# match holding `...` is prose, counted and printed as PROSE, never resolved. A
+# path whose preceding text on its line ends in "<name>'s ", "<name> " or
+# "~/<name> && " -- one backtick before the path is ignored -- where <name> is
+# a sibling (a directory beside this repo's root holding .git, read from the
+# disk: no list of names is carried here), resolves in that repo's index and
+# prints ELSEWHERE. Its limits:
+#   - A qualifier on the line before the path is not seen; the path resolves
+#     here, and a rewording fixes it.
+#   - A sibling absent from the machine is an ordinary word; the path resolves
+#     here. On a machine without the siblings, a path that belongs to another
+#     repo is checked against this one, and a same-named file resolves falsely.
+#   - A repo's name inside the path, <name>/bin/x, is not extracted.
 #
 # Exit codes:
 #   0  sound    -- paths resolve or are waived; objective matches; stamp valid;
 #                  the session's working-agreement section exists
 #   1  defect   -- a path dangles, the objective is missing or differs, the
-#                  stamp is missing, duplicated, malformed, or unresolved, or
-#                  the brief's session has no working-agreement section
-#   2  unknown  -- the check could not run (no brief, not a git repo)
+#                  stamp is missing, duplicated, malformed, or unresolved, the
+#                  brief's session has no working-agreement section, or an open
+#                  item was dropped, duplicated, or waits on nothing
+#   2  unknown  -- no defect, but a check could not run (no brief, not a git
+#                  repo, a git command that failed mid-check). What could not
+#                  run is named. A defect wins: both are printed, and the exit
+#                  is 1.
 #
 # Usage: bin/scaffold-brief-check
 set -euo pipefail
@@ -69,6 +92,19 @@ WA="WORKING-AGREEMENT.md"
 EXIT_SOUND=0
 EXIT_DEFECT=1
 EXIT_UNKNOWN=2
+
+# A repo's own core.fsmonitor is a program git runs, even for ls-files. This
+# entry is added on top of whatever the caller set, and comes last, so it also
+# wins over a caller's own core.fsmonitor: reading a sibling runs none of its
+# configuration. A count git would refuse is named here, before any check.
+if ! [[ "${GIT_CONFIG_COUNT:-0}" =~ ^[0-9]+$ ]]; then
+  echo "== bin/scaffold-brief-check =="
+  echo "  GIT_CONFIG_COUNT='${GIT_CONFIG_COUNT}' is not a number -- git would refuse it; nothing was checked"
+  exit $EXIT_UNKNOWN
+fi
+n=$((10#${GIT_CONFIG_COUNT:-0}))
+export "GIT_CONFIG_KEY_${n}=core.fsmonitor" "GIT_CONFIG_VALUE_${n}=false"
+export GIT_CONFIG_COUNT=$((n + 1))
 
 if [ ! -f "$BRIEF" ]; then
   echo "== ${BRIEF} =="
@@ -89,50 +125,187 @@ if ! git rev-parse --verify --quiet HEAD >/dev/null; then
 fi
 
 defects=0
+unknown=0   # checks that could not run
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+GIT_ERR="$TMP/git.err"
+
+could_not_run() {   # could_not_run <what>
+  echo "  could not run: $1"
+  unknown=$((unknown + 1))
+}
+
+# gfile <file> <git args...>: git's stdout into the file. On failure its stderr
+# is printed, never discarded, and its exit code returned, so a failed read is
+# could-not-run and not a death under set -e.
+gfile() {
+  local out="$1"; shift
+  local rc=0
+  git "$@" >"$out" 2>"$GIT_ERR" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  git $* exited ${rc}:"
+    sed 's/^/    /' "$GIT_ERR"
+  fi
+  return "$rc"
+}
 
 # ---------------------------------------------------------------- references
 
 # Roots are this repo's own tracked top-level directories, so the script
 # needs no per-project list. Absolute paths, ~ paths, and URLs belong to
 # machines and remotes and are none of this script's business.
-roots="$(git ls-tree -d --name-only HEAD | sed 's/[]\\.*^$()+?{}|[]/\\&/g' | paste -sd'|' -)"
-
 echo "== ${BRIEF} -- do its references resolve? =="
 
-cited=""
-if [ -n "$roots" ]; then
-  # grep exits 1 on no-match; `|| true` makes "brief cites nothing" data,
-  # not a crash. stderr is left visible so a read failure is not silent.
-  cited="$(grep -oE "(^|[^A-Za-z0-9._/~-])(${roots})/[A-Za-z0-9._/-]*" "$BRIEF" \
-    | grep -oE "(${roots})/[A-Za-z0-9._/-]*" \
-    | sed 's/[.,:;)]*$//' \
-    | sort -u || true)"
+roots=""
+if gfile "$TMP/roots" ls-tree -d --name-only -z HEAD; then
+  roots="$(tr '\000' '\n' < "$TMP/roots" | sed 's/[]\\.*^$()+?{}|[]/\\&/g' | paste -sd'|' -)"
+else
+  could_not_run "the path roots (git ls-tree failed) -- the references were not checked"
 fi
 
 waived=""
 if [ -f "$IGNORE" ]; then
   waived="$(grep -vE '^[[:space:]]*(#|$)' "$IGNORE" | sed 's/[[:space:]]*$//' || true)"
 fi
+in_waived() { [ -n "$waived" ] && printf '%s\n' "$waived" | grep -Fxq -- "$1"; }
 
-if [ -z "$cited" ]; then
+n_files=0; n_ok=0; n_waived=0; n_bad=0; n_else=0; n_prose=0
+declare -A RESOLVED=()   # repo|path -> ok | waived | bad
+
+# Siblings (spec 4.4): the directories beside this repo's root holding .git,
+# read from the disk, one name per line, this repo's own excluded.
+repo_root=""
+if gfile "$TMP/top" rev-parse --show-toplevel; then repo_root="$(cat "$TMP/top")"
+else could_not_run "this repo's root (git rev-parse failed) -- no sibling can be named"; fi
+repo_parent="$(dirname "${repo_root:-.}")"
+sibling_names() {
+  local g name
+  [ -n "$repo_root" ] || return 0
+  shopt -s nullglob dotglob
+  for g in "$repo_parent"/*/.git; do
+    name="$(basename "$(dirname "$g")")"
+    case "$name" in .|..) continue ;; esac
+    [ "$repo_parent/$name" = "$repo_root" ] || printf '%s\n' "$name"
+  done
+  shopt -u nullglob dotglob
+}
+siblings="$(sibling_names)"
+
+# cite_scan <file>: every path match in the file, one record per match:
+# line, raw match and qualifying sibling (empty when none), split on \037
+# because the last field can be empty. A path is a tracked top-level directory
+# followed by /[A-Za-z0-9._/-]*, not preceded by a path character or ~ (absolute
+# paths, ~ paths and URLs are machines' and remotes' business). Copied from
+# bin/scaffold-doc-check, not imported; tests/test-doc-check case 13 proves
+# the two agree.
+cite_scan() {
+  SCAN_ROOTS="$roots" SCAN_SIBS="$siblings" awk '
+    function ends_in(b, form) {
+      return length(b) >= length(form) && substr(b, length(b) - length(form) + 1) == form
+    }
+    function bounded(b, form) {   # the text before the form is not a name character
+      return length(b) == length(form) || substr(b, length(b) - length(form), 1) !~ /[A-Za-z0-9._-]/
+    }
+    function qualifier(b,    i) {
+      if (substr(b, length(b)) == "`") b = substr(b, 1, length(b) - 1)
+      for (i = 1; i <= nsib; i++) {
+        if (sib[i] == "") continue
+        if (ends_in(b, "~/" sib[i] " && ")) return sib[i]
+        if (ends_in(b, sib[i] "\047s ") && bounded(b, sib[i] "\047s ")) return sib[i]
+        if (ends_in(b, sib[i] " ") && bounded(b, sib[i] " ")) return sib[i]
+      }
+      return ""
+    }
+    BEGIN {
+      path = "(" ENVIRON["SCAN_ROOTS"] ")/[A-Za-z0-9._/-]*"
+      cite = "(^|[^A-Za-z0-9._/~-])" path
+      nsib = split(ENVIRON["SCAN_SIBS"], sib, "\n")
+    }
+    {
+      s = $0; off = 0
+      while (s != "" && match(s, cite)) {
+        at = RSTART; len = RLENGTH; m = substr(s, at, len)
+        match(m, path)
+        printf "%d\037%s\037%s\n", NR, substr(m, RSTART, RLENGTH), qualifier(substr($0, 1, off + at + RSTART - 2))
+        off += at + len - 1; s = substr(s, at + len)
+      }
+    }
+  ' "$1"
+}
+
+# resolve <file> <line> <path> <repo>: git ls-files non-empty (a tracked file
+# there, or beneath it), else waived, else dangling. With a repo, in that
+# sibling's index. Its status is read directly: a [ -n "$(...)" ] test reads a
+# failure as empty, and so as dangling. The cache is keyed on the pair of repo
+# and path, so a qualified citation cannot mask an unqualified dangling one.
+resolve() {
+  local f="$1" ln="$2" p="$3" name="$4" key="$4|$3" rc=0
+  # A hook's exported GIT_DIR would redirect git -C, so a sibling read drops it.
+  local -a ls=(git ls-files -z -- "$p")
+  [ -z "$name" ] || ls=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$repo_parent/$name" ls-files -z -- "$p")
+  if [ -z "${RESOLVED[$key]+x}" ]; then
+    LC_ALL=C "${ls[@]}" >"$TMP/resolve" 2>"$GIT_ERR" || rc=$?
+    # A path that climbs out of the repo is tracked by nothing: an answer, not
+    # a failed read, so it stays waivable. Any other failure is could-not-run.
+    # LC_ALL=C because the test below reads git's message.
+    if [ "$rc" -ne 0 ] && grep -q 'outside repository' "$GIT_ERR"; then rc=0; : > "$TMP/resolve"; fi
+    if [ "$rc" -ne 0 ]; then
+      echo "  ${ls[*]} exited ${rc}:"; sed 's/^/    /' "$GIT_ERR"
+      could_not_run "${f}:${ln} ${p} -- not resolved"
+      return 0
+    fi
+    if [ -s "$TMP/resolve" ]; then RESOLVED[$key]=ok
+    elif in_waived "$p"; then RESOLVED[$key]=waived
+    elif [ -z "$repo_root" ]; then
+      # No sibling could be named, so a qualifier was not read: not a verdict.
+      could_not_run "${f}:${ln} ${p} -- not found here, and no sibling could be read"
+      return 0
+    else RESOLVED[$key]=bad; fi
+  fi
+  local in=""
+  [ -z "$name" ] || in=" (in ${name})"
+  case "${RESOLVED[$key]}" in
+    ok)
+      if [ -n "$name" ]; then echo "  ELSEWHERE ${f}:${ln} ${p}${in}"; n_else=$((n_else + 1))
+      else n_ok=$((n_ok + 1)); fi ;;
+    waived) echo "  WAIVED   ${f}:${ln} ${p}${in}  (listed in ${IGNORE})"; n_waived=$((n_waived + 1)) ;;
+    bad)    echo "  DANGLING ${f}:${ln} ${p}${in}"; n_bad=$((n_bad + 1)) ;;
+  esac
+}
+
+# scan_refs <file>: each citation of the file. A raw match holding ... is prose,
+# tested before the trim because docs/... trims to docs/, which resolves;
+# printed once per file, line and match. Otherwise the trailing .,:;) is trimmed
+# and each distinct pair of repo and path is reported once, at its first line.
+scan_refs() {
+  local f="$1" ln raw name p
+  local -A seen=()
+  n_files=$((n_files + 1))
+  if ! cite_scan "$f" > "$TMP/cites"; then could_not_run "${f}: its citations (awk failed) -- not scanned"; return 0; fi
+  while IFS=$'\037' read -r ln raw name; do
+    if [[ "$raw" == *...* ]]; then
+      [ -z "${seen[prose|$ln|$raw]+x}" ] || continue
+      seen[prose|$ln|$raw]=1
+      echo "  PROSE    ${f}:${ln} ${raw}"; n_prose=$((n_prose + 1))
+      continue
+    fi
+    p="$raw"
+    while [[ "$p" == *[.,:\;\)] ]]; do p="${p%?}"; done
+    [ -n "$p" ] || continue
+    [ -z "${seen[$name|$p]+x}" ] || continue
+    seen[$name|$p]=1
+    resolve "$f" "$ln" "$p" "$name"
+  done < "$TMP/cites"
+}
+
+if [ -n "$roots" ]; then
+  scan_refs "$BRIEF"
+fi
+if [ $((n_ok + n_waived + n_bad + n_else + n_prose)) -eq 0 ] && [ "$unknown" -eq 0 ]; then
   echo "  no repo-relative paths cited"
 else
-  n_ok=0; n_waived=0; n_bad=0
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    # ls-files matches a tracked file at that path or any tracked file
-    # beneath it if the path is a directory; empty output means neither.
-    if [ -n "$(git ls-files -- "$path")" ]; then
-      n_ok=$((n_ok + 1))
-    elif [ -n "$waived" ] && printf '%s\n' "$waived" | grep -Fxq -- "$path"; then
-      echo "  WAIVED   ${path}  (listed in ${IGNORE})"
-      n_waived=$((n_waived + 1))
-    else
-      echo "  DANGLING ${path}"
-      n_bad=$((n_bad + 1))
-    fi
-  done <<< "$cited"
-  echo "  ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling"
+  echo "  ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling, ${n_else} in other repos, ${n_prose} prose"
   if [ "$n_bad" -gt 0 ]; then
     echo "  -> the file was never written (write it), or its absence is"
     echo "     intentional (add the path to ${IGNORE} with a comment saying why)"
@@ -215,11 +388,18 @@ elif ! printf '%s\n' "$stamps" | grep -qE "$STAMP_RE"; then
   defects=$((defects + 1))
 else
   sha="$(printf '%s\n' "$stamps" | awk '{print $2}')"
-  if git cat-file -e "${sha}^{commit}"; then
+  # One read cannot separate "names no commit" from "could not read": an absent
+  # sha, a tree, a blob and an unreadable pack can all exit 1, some silently. So
+  # a stamp that does not resolve is judged by a second read: HEAD reading proves
+  # the object store answers, and the answer about the stamp stands.
+  if git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null 2>"$GIT_ERR"; then
     echo "  ${sha} -- well-formed, commit exists"
-  else
+  elif git cat-file -e 'HEAD^{commit}' 2>"$GIT_ERR"; then
     echo "  ${sha} -- well-formed, but no such commit in this repo"
     defects=$((defects + 1))
+  else
+    sed 's/^/    /' "$GIT_ERR"
+    could_not_run "the stamp's commit (HEAD does not read either) -- ${sha} was not judged"
   fi
 fi
 
@@ -262,10 +442,200 @@ else
   defects=$((defects + 1))
 fi
 
+# ---------------------------------------------------------------- continuity
+
+# The fifth block (spec 4.1). Fenced blocks are blanked first, by doc-check's
+# rule, so a quoted list is not read.
+blank_fences() {
+  awk '
+    !inf && match($0, /^(```+|~~~+)/) { inf = 1; fence = substr($0, 1, RLENGTH); print ""; next }
+    inf && substr($0, 1, length(fence)) == fence { inf = 0; print ""; next }
+    inf { print ""; next }
+    { print }
+  ' "$1"
+}
+
+# open_section <file>: the lines of the first ## Open section, each as
+# "<line number>\037<text>". Accepts ## Open, ## 7. Open and ## Open, in order;
+# refuses ## Opening the next chat.
+open_section() {
+  blank_fences "$1" | awk '
+    !on && /^## ([0-9]+\. )?Open([^a-z]|$)/ { on = 1; next }
+    on && /^## / { exit }
+    on { printf "%d\037%s\n", NR, $0 }
+  '
+}
+
+# open_items <section file>: one record per numbered item, column 0, its text
+# running to the next item or the section's end: number, line, and E when the
+# text ends in a Waits on: that names nothing.
+open_items() {
+  awk -F '\037' '
+    function flush() {
+      if (cur != "") printf "%d\037%d\037%s\n", cur, at, (txt ~ /Waits on:[[:space:][:punct:]]*$/ ? "E" : "")
+    }
+    {
+      line = $0; sub(/^[0-9]+\037/, "", line)
+      if (line ~ /^[0-9]+\.[[:space:]]/) { flush(); cur = line + 0; at = $1 + 0; txt = line; next }
+      if (cur != "") txt = txt " " line
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# closed_line <section file>: the Closed line, read in the spec's order. Prints
+# "C\037<n>" per closed number and "U\037<piece>" per piece that closes nothing.
+closed_line() {
+  awk '
+    function trim(t) { gsub(/^[ *]+/, "", t); gsub(/[ *]+$/, "", t); return t }
+    function strip_parens(t,    i, c, d, o) {
+      d = 0; o = ""
+      for (i = 1; i <= length(t); i++) {
+        c = substr(t, i, 1)
+        if (c == "(") d++
+        else if (c == ")") { if (d > 0) d--; else o = o c }
+        else if (d == 0) o = o c
+      }
+      return o
+    }
+    {
+      line = $0; sub(/^[0-9]+\037/, "", line)
+      if (!found) {
+        if (line ~ /^(\*\*)?Closed this session:(\*\*)?/) {
+          found = 1; sub(/^(\*\*)?Closed this session:(\*\*)?/, "", line); text = line
+        }
+        next
+      }
+      if (line ~ /^[[:space:]]*$/ || line ~ /^\*\*/) exit
+      text = text " " line
+    }
+    END {
+      if (!found) exit
+      while (match(text, /`[^`]*`/)) text = substr(text, 1, RSTART - 1) substr(text, RSTART + RLENGTH)
+      text = trim(strip_parens(text))
+      if (match(text, /[.;] /)) text = substr(text, 1, RSTART - 1)
+      sub(/[.;]$/, "", text)
+      text = trim(text)
+      if (tolower(substr(text, 1, 4)) == "none") exit
+      n = split(text, piece, /,| and /)
+      for (i = 1; i <= n; i++) {
+        p = piece[i]; gsub(/^[ *]+/, "", p); gsub(/[ *]+$/, "", p)
+        if (p == "") continue
+        if (p ~ /^[0-9]+$/) printf "C\037%d\n", p + 0
+        else printf "U\037%s\n", p
+      }
+    }
+  ' "$1"
+}
+
+# earlier_brief: the newest commit whose blob of the brief differs from the
+# working file, so the check gives the same answer before the closeout's commit
+# and after it. Sets EARLIER_SHA, or leaves it empty when there is none (a new
+# brief, or one with one version). A commit that deleted the brief has no blob
+# and is passed over. Returns non-zero on a git failure.
+earlier_brief() {
+  local here c blob
+  EARLIER_SHA=""
+  gfile "$TMP/here" hash-object -- "$BRIEF" || return 1
+  here="$(cat "$TMP/here")"
+  gfile "$TMP/history" log --format=%H -- "$BRIEF" || return 1
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    gfile "$TMP/tree" ls-tree "$c" -- "$BRIEF" || return 1
+    blob="$(awk '{ print $3 }' "$TMP/tree")"
+    [ -n "$blob" ] || continue
+    if [ "$blob" != "$here" ]; then
+      EARLIER_SHA="$c"
+      gfile "$TMP/earlier.md" cat-file blob "$blob" || return 1
+      return 0
+    fi
+  done < "$TMP/history"
+  return 0
+}
+
+# continuity: returns 0 passed, 1 defect, 2 could not run. Called in an
+# `||` context, so set -e is suspended for its reads.
+continuity() {
+  local short n m c bad=0 num ln e tag val
+  local -A here=() before=() closed=() lines=() reported=()
+  if ! earlier_brief; then
+    could_not_run "the earlier brief (git failed) -- open items were not compared"
+    return 2
+  fi
+  if [ -z "$EARLIER_SHA" ]; then
+    echo "  no earlier brief to compare"
+    return 0
+  fi
+  if ! gfile "$TMP/short" rev-parse --short "$EARLIER_SHA"; then
+    could_not_run "the earlier brief's name (git failed) -- open items were not compared"
+    return 2
+  fi
+  short="$(cat "$TMP/short")"
+
+  open_section "$BRIEF" > "$TMP/new.sec"
+  open_section "$TMP/earlier.md" > "$TMP/old.sec"
+  open_items "$TMP/new.sec" > "$TMP/new.items"
+  open_items "$TMP/old.sec" > "$TMP/old.items"
+  closed_line "$TMP/new.sec" > "$TMP/closed"
+
+  while IFS=$'\037' read -r tag val; do
+    if [ "$tag" = C ]; then closed[$val]=1
+    else echo "  UNREAD   Closed line: ${val}"; fi
+  done < "$TMP/closed"
+
+  n=0
+  while IFS=$'\037' read -r num ln e; do
+    n=$((n + 1))
+    here[$num]=1
+    lines[$num]="${lines[$num]:+${lines[$num]}, }${ln}"
+    if [ "$e" = E ]; then
+      echo "  EMPTY    item ${num} -- 'Waits on:' names nothing"
+      bad=$((bad + 1))
+    fi
+  done < "$TMP/new.items"
+
+  while IFS=$'\037' read -r num ln e; do
+    if [[ "${lines[$num]}" == *,* ]] && [ -z "${reported[$num]+x}" ]; then
+      reported[$num]=1
+      echo "  DUPLICATE item ${num} (lines ${lines[$num]})"
+      bad=$((bad + 1))
+    fi
+  done < "$TMP/new.items"
+
+  m=0
+  while IFS=$'\037' read -r num ln e; do
+    [ -z "${before[$num]+x}" ] || continue
+    before[$num]=1
+    if [ -n "${here[$num]+x}" ]; then m=$((m + 1))
+    elif [ -z "${closed[$num]+x}" ]; then
+      echo "  MISSING  item ${num} -- in the brief at ${short}, not here, and not on the Closed line"
+      bad=$((bad + 1))
+    fi
+  done < "$TMP/old.items"
+
+  [ "$bad" -eq 0 ] || return 1
+  if [ "$n" -eq 0 ] && [ "${#before[@]}" -eq 0 ]; then
+    echo "  no numbered items in ## Open -- nothing compared"
+  else
+    echo "  ${n} item(s), ${m} number(s) carried from ${short}, ${#closed[@]} closed"
+  fi
+  return 0
+}
+
+echo
+echo "== ${BRIEF} -- did every open item survive? =="
+rc=0
+continuity || rc=$?
+[ "$rc" -ne 1 ] || defects=$((defects + 1))
+
 echo
 if [ "$defects" -gt 0 ]; then
   echo "defect -- ${defects} check(s) failed"
   exit $EXIT_DEFECT
 fi
-echo "sound -- paths resolve or are waived; objective verbatim; stamp valid; session section present"
+if [ "$unknown" -gt 0 ]; then
+  echo "unknown -- ${unknown} check(s) could not run"
+  exit $EXIT_UNKNOWN
+fi
+echo "sound -- paths resolve or are waived; objective verbatim; stamp valid; session section present; open items carried"
 exit $EXIT_SOUND

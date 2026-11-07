@@ -8,6 +8,7 @@
 **Status:** PROPOSED | ACCEPTED | SUPERSEDED by ADR-[NNN]
 **Date:** [DATE]
 **Deciders:** [who]
+**Review by:** [YYYY-MM-DD]
 
 ## Context
 > The situation forcing a decision. What's true, what's constrained, what's at

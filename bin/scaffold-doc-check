@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check this repo's living documents against what the method says they carry.
-# Three checks, each printed as its own block:
+# Four checks, each printed as its own block:
 #
 #   1. Headers        -- a spec (docs/specs/) or ADR (docs/decisions/) carries
 #                        every field and section of its template, each field
@@ -11,6 +11,9 @@
 #   3. Required lines -- the handoff brief, master plan and working agreement
 #                        carry every line their templates mark
 #                        `<!-- required -->`, filled in.
+#   4. Review dates   -- an ADR's **Review by:** date, and upstream the operator
+#                        profile's (review by YYYY-MM-DD) lines, are valid, not
+#                        past, and not more than 730 days out.
 #
 # Why (1): "a spec is checked before it is issued", and three sessions running
 # the defect in a spec was found by the executor's first act. The fields and
@@ -25,6 +28,12 @@
 # one a project lacks. This block is that promise. The required set is read
 # from the markers; this script carries no list of required lines.
 #
+# Why (4): a settled method can fall behind outside practice, and both 2026-10
+# reviews happened only because the operator asked (ADR-015). A dated line turns
+# "check periodically" into a closeout that fails. The tool cannot tell a review
+# from an edit; the renewal is recorded on the line, under a commit
+# (docs/specs/check-revision-v1.15.0.md 4.7).
+#
 # Spec: docs/specs/scaffold-doc-check.md. The reference extraction is
 # bin/scaffold-brief-check's, copied not imported, and tests/test-doc-check
 # case 13 proves the two agree.
@@ -34,8 +43,19 @@
 # .briefcheckignore, one path per line, so every waiver is a decision somebody
 # wrote down. It judges form, not content.
 #
-# Known limit: a path that belongs to another repo (after `cd ~/other && ...`)
-# is checked against this one. Same-named files will resolve falsely.
+# Prose and siblings (docs/specs/check-revision-v1.15.0.md 4.3, 4.4): a raw
+# match holding `...` is prose, counted and printed as PROSE, never resolved. A
+# path whose preceding text on its line ends in "<name>'s ", "<name> " or
+# "~/<name> && " -- one backtick before the path is ignored -- where <name> is
+# a sibling (a directory beside this repo's root holding .git, read from the
+# disk: no list of names is carried here), resolves in that repo's index and
+# prints ELSEWHERE. Its limits:
+#   - A qualifier on the line before the path is not seen; the path resolves
+#     here, and a rewording fixes it.
+#   - A sibling absent from the machine is an ordinary word; the path resolves
+#     here. On a machine without the siblings, a path that belongs to another
+#     repo is checked against this one, and a same-named file resolves falsely.
+#   - A repo's name inside the path, <name>/bin/x, is not extracted.
 #
 # Synced copies (spec 4.2, amendment 2): downstream -- a repo with no export/
 # directory, the test bin/scaffold-freshness uses -- every file in
@@ -68,7 +88,8 @@
 #
 # Exit codes:
 #   0  sound    -- every checked document is sound
-#   1  defect   -- a header miss, a dangling path, or a required line missing
+#   1  defect   -- a header miss, a dangling path, a required line missing, or
+#                  a review date past, too far out, unreadable or absent
 #   2  unknown  -- no defect, but some check could not run: not a git repo, no
 #                  commits, a template missing or unparseable, a git command
 #                  that failed mid-check. What could not run is named.
@@ -80,12 +101,31 @@
 #                                            # header and required-line gates
 #                                            # apply whatever the file's history
 #                                            # (the pre-issue form for a spec)
+#        bin/scaffold-doc-check --repo <path> <file>...
+#                                            # from the governing repo's root:
+#                                            # its templates and this script,
+#                                            # <path>'s files, index and
+#                                            # .briefcheckignore. A component
+#                                            # repo carries no template copies.
 set -uo pipefail
 export GIT_OPTIONAL_LOCKS=0
 
 EXIT_SOUND=0
 EXIT_DEFECT=1
 EXIT_UNKNOWN=2
+
+# A repo's own core.fsmonitor is a program git runs, even for ls-files. This
+# entry is added on top of whatever the caller set, and comes last, so it also
+# wins over a caller's own core.fsmonitor: reading a sibling runs none of its
+# configuration. A count git would refuse is named here, before any check.
+if ! [[ "${GIT_CONFIG_COUNT:-0}" =~ ^[0-9]+$ ]]; then
+  echo "== bin/scaffold-doc-check =="
+  echo "  GIT_CONFIG_COUNT='${GIT_CONFIG_COUNT}' is not a number -- git would refuse it; nothing was checked"
+  exit $EXIT_UNKNOWN
+fi
+n=$((10#${GIT_CONFIG_COUNT:-0}))
+export "GIT_CONFIG_KEY_${n}=core.fsmonitor" "GIT_CONFIG_VALUE_${n}=false"
+export GIT_CONFIG_COUNT=$((n + 1))
 
 IGNORE="${SCAFFOLD_BRIEF_IGNORE:-.briefcheckignore}"
 SPEC_TEMPLATE="docs/specs/component-spec-TEMPLATE.md"
@@ -181,6 +221,21 @@ unfenced() {
   printf '%s\n' "${UNFENCED[$f]}"
 }
 
+usage() {
+  echo "usage: bin/scaffold-doc-check [<path>...]" >&2
+  echo "       bin/scaffold-doc-check --repo <path> <file>..." >&2
+  exit $EXIT_UNKNOWN
+}
+
+# --repo comes first and needs a file: a whole-repo run needs a cutoff and a
+# SYNCED a component repo does not have.
+REPO_MODE=false; TARGET=""
+if [ "${1:-}" = --repo ]; then
+  [ $# -ge 3 ] || usage
+  REPO_MODE=true; TARGET="$2"; shift 2
+fi
+for a in "$@"; do [ "$a" != --repo ] || usage; done
+
 # ------------------------------------------------------------------ preflight
 
 if ! git rev-parse --git-dir >/dev/null 2>"$GIT_ERR"; then
@@ -206,6 +261,28 @@ if ! git rev-parse --verify --quiet HEAD >/dev/null; then
   echo "== ${TOOL_PATH} =="
   echo "  repo has no commits -- cannot check"
   exit $EXIT_UNKNOWN
+fi
+
+# --repo (spec 4.6): the five template paths are made absolute from the governing
+# root, then the script moves to the target, so every other line runs unchanged.
+if $REPO_MODE; then
+  refuse() { echo "== ${TOOL_PATH} =="; echo "  --repo ${TARGET}: $1 -- nothing was checked"; exit $EXIT_UNKNOWN; }
+  g gov_root rev-parse --show-toplevel || exit $EXIT_UNKNOWN
+  g gov_sha rev-parse --short HEAD || exit $EXIT_UNKNOWN
+  # A hook's exported GIT_DIR names the governing repo, not the target.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+  [ -d "$TARGET" ] || refuse "not a directory"
+  git -C "$TARGET" rev-parse --git-dir >/dev/null 2>"$GIT_ERR" || { sed 's/^/    /' "$GIT_ERR"; refuse "not a git repo"; }
+  git -C "$TARGET" rev-parse --verify --quiet HEAD >/dev/null || refuse "repo has no commits"
+  t_prefix="$(git -C "$TARGET" rev-parse --show-prefix 2>"$GIT_ERR")" || { sed 's/^/    /' "$GIT_ERR"; refuse "git rev-parse --show-prefix failed"; }
+  [ -z "$t_prefix" ] || refuse "not that repo's root (it is ${t_prefix} inside one)"
+  SPEC_TEMPLATE="${gov_root}/${SPEC_TEMPLATE}"; ADR_TEMPLATE="${gov_root}/${ADR_TEMPLATE}"
+  for i in "${!PLANNING_TEMPLATES[@]}"; do PLANNING_TEMPLATES[$i]="${gov_root}/${PLANNING_TEMPLATES[$i]}"; done
+  IGNORE=".briefcheckignore"
+  cd "$TARGET" || refuse "could not change directory"
+  g t_root rev-parse --show-toplevel || exit $EXIT_UNKNOWN
+  g t_sha rev-parse --short HEAD || exit $EXIT_UNKNOWN
+  echo "governing: ${gov_root} at ${gov_sha}; checking: ${t_root} at ${t_sha}"
 fi
 
 # ------------------------------------------------------------- the arguments
@@ -271,7 +348,10 @@ judge_header_field() {
     allowed="$(allowed_statuses "$tval")"
     printf '%s\n' $allowed | grep -Fxq -- "$first" \
       || finding HEADER "$f" "Status '${first}' is not one of: ${allowed}"
+    grep -qiF 'commit to follow' <<< "$dval" \
+      && finding HEADER "$f" "Status says 'commit to follow' -- name the commit, or say the work is uncommitted"
   fi
+  return 0
 }
 
 # check_header <doc> <template>: the gated document against its template.
@@ -280,6 +360,9 @@ check_header() {
   echo "  checked  ${f}"
   while IFS= read -r label; do
     [ -n "$label" ] || continue
+    # The review block judges this one (spec 4.7): an ADR is never rewritten
+    # to fit a later template.
+    [ "$label" != "Review by" ] || continue
     judge_header_field "$f" "$t" "$label"
   done <<< "$(template_fields "$t")"
   while IFS= read -r h; do
@@ -314,13 +397,13 @@ header_kind() {
   return 0
 }
 
-# is_gated <path> <kind> <status XY>: without path arguments. A spec is gated
-# if untracked, modified in tree or index, or touched by a commit after the
+# is_gated <path> <kind> <status XY> <cutoff>: without path arguments. A spec is
+# gated if untracked, modified in tree or index, or touched by a commit after the
 # cutoff. An ADR only if untracked or ADDED after the cutoff: an ADR is never
 # rewritten to fit a later template, and a status change on an old ADR is not
 # a reason to gate it (scaffolding 030). Returns 2 when git log failed.
 is_gated() {
-  local c="$1" kind="$2" stat="$3" cm
+  local c="$1" kind="$2" stat="$3" cutoff="$4" cm
   case "$kind" in
     spec)
       [ -n "$stat" ] && return 0
@@ -399,7 +482,7 @@ else
       [ -n "$kind" ] || continue
       if [ ! -f "$c" ]; then echo "  skipped  ${c} (in the index, not in the working tree)"; continue; fi
       stat="${STAT[$c]-}"
-      if is_gated "$c" "$kind" "$stat"; then
+      if is_gated "$c" "$kind" "$stat" "$cutoff"; then
         case "$kind" in
           spec) $spec_ok || continue; check_header "$c" "$SPEC_TEMPLATE" ;;
           adr)  $adr_ok  || continue; check_header "$c" "$ADR_TEMPLATE" ;;
@@ -425,8 +508,8 @@ echo
 echo "== reference check -- do the repo-relative paths in living documents resolve? =="
 
 ref_before=$defects
-n_files=0; n_ok=0; n_waived=0; n_bad=0
-declare -A RESOLVED=()   # path -> ok | waived | bad, so a path repeated across files is resolved once
+n_files=0; n_ok=0; n_waived=0; n_bad=0; n_else=0; n_prose=0
+declare -A RESOLVED=()   # repo|path -> ok | waived | bad, so a citation repeated across files is resolved once
 
 waived=""
 if [ -f "$IGNORE" ]; then
@@ -434,46 +517,128 @@ if [ -f "$IGNORE" ]; then
 fi
 in_waived() { [ -n "$waived" ] && printf '%s\n' "$waived" | grep -Fxq -- "$1"; }
 
-# resolve <file> <line> <path>: brief-check's resolution -- git ls-files
-# non-empty (a tracked file there, or beneath it), else waived, else dangling.
+# Siblings (spec 4.4): the directories beside this repo's root holding .git,
+# read from the disk, one name per line, this repo's own excluded.
+g repo_root rev-parse --show-toplevel || could_not_run "this repo's root (git rev-parse failed) -- no sibling can be named"
+repo_parent="$(dirname "${repo_root:-.}")"
+sibling_names() {
+  local g name
+  [ -n "$repo_root" ] || return 0
+  shopt -s nullglob dotglob
+  for g in "$repo_parent"/*/.git; do
+    name="$(basename "$(dirname "$g")")"
+    case "$name" in .|..) continue ;; esac
+    [ "$repo_parent/$name" = "$repo_root" ] || printf '%s\n' "$name"
+  done
+  shopt -u nullglob dotglob
+}
+siblings="$(sibling_names)"
+
+# cite_scan <file>: every path match in the file, one record per match:
+# line, raw match and qualifying sibling (empty when none), split on \037
+# because the last field can be empty. A path is a tracked top-level directory
+# followed by /[A-Za-z0-9._/-]*, not preceded by a path character or ~ (absolute
+# paths, ~ paths and URLs are machines' and remotes' business). Copied in
+# bin/scaffold-brief-check, not imported; tests/test-doc-check case 13 proves
+# the two agree.
+cite_scan() {
+  SCAN_ROOTS="$roots" SCAN_SIBS="$siblings" awk '
+    function ends_in(b, form) {
+      return length(b) >= length(form) && substr(b, length(b) - length(form) + 1) == form
+    }
+    function bounded(b, form) {   # the text before the form is not a name character
+      return length(b) == length(form) || substr(b, length(b) - length(form), 1) !~ /[A-Za-z0-9._-]/
+    }
+    function qualifier(b,    i) {
+      if (substr(b, length(b)) == "`") b = substr(b, 1, length(b) - 1)
+      for (i = 1; i <= nsib; i++) {
+        if (sib[i] == "") continue
+        if (ends_in(b, "~/" sib[i] " && ")) return sib[i]
+        if (ends_in(b, sib[i] "\047s ") && bounded(b, sib[i] "\047s ")) return sib[i]
+        if (ends_in(b, sib[i] " ") && bounded(b, sib[i] " ")) return sib[i]
+      }
+      return ""
+    }
+    BEGIN {
+      path = "(" ENVIRON["SCAN_ROOTS"] ")/[A-Za-z0-9._/-]*"
+      cite = "(^|[^A-Za-z0-9._/~-])" path
+      nsib = split(ENVIRON["SCAN_SIBS"], sib, "\n")
+    }
+    {
+      s = $0; off = 0
+      while (s != "" && match(s, cite)) {
+        at = RSTART; len = RLENGTH; m = substr(s, at, len)
+        match(m, path)
+        printf "%d\037%s\037%s\n", NR, substr(m, RSTART, RLENGTH), qualifier(substr($0, 1, off + at + RSTART - 2))
+        off += at + len - 1; s = substr(s, at + len)
+      }
+    }
+  ' "$1"
+}
+
+# resolve <file> <line> <path> <repo>: git ls-files non-empty (a tracked file
+# there, or beneath it), else waived, else dangling. With a repo, in that
+# sibling's index. Its status is read directly: a [ -n "$(...)" ] test reads a
+# failure as empty, and so as dangling. The cache is keyed on the pair of repo
+# and path, so a qualified citation cannot mask an unqualified dangling one.
 resolve() {
-  local f="$1" ln="$2" p="$3" rc
-  if [ -z "${RESOLVED[$p]+x}" ]; then
-    git ls-files -z -- "$p" >"$TMP/resolve" 2>"$GIT_ERR"; rc=$?
+  local f="$1" ln="$2" p="$3" name="$4" key="$4|$3" rc=0
+  # A hook's exported GIT_DIR would redirect git -C, so a sibling read drops it.
+  local -a ls=(git ls-files -z -- "$p")
+  [ -z "$name" ] || ls=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$repo_parent/$name" ls-files -z -- "$p")
+  if [ -z "${RESOLVED[$key]+x}" ]; then
+    LC_ALL=C "${ls[@]}" >"$TMP/resolve" 2>"$GIT_ERR" || rc=$?
+    # A path that climbs out of the repo is tracked by nothing: an answer, not
+    # a failed read, so it stays waivable. Any other failure is could-not-run.
+    # LC_ALL=C because the test below reads git's message.
+    if [ "$rc" -ne 0 ] && grep -q 'outside repository' "$GIT_ERR"; then rc=0; : > "$TMP/resolve"; fi
     if [ "$rc" -ne 0 ]; then
-      echo "  git ls-files -z -- ${p} exited ${rc}:"; sed 's/^/    /' "$GIT_ERR"
+      echo "  ${ls[*]} exited ${rc}:"; sed 's/^/    /' "$GIT_ERR"
       could_not_run "${f}:${ln} ${p} -- not resolved"
-      return
+      return 0
     fi
-    if [ -s "$TMP/resolve" ]; then RESOLVED[$p]=ok
-    elif in_waived "$p"; then RESOLVED[$p]=waived
-    else RESOLVED[$p]=bad; fi
+    if [ -s "$TMP/resolve" ]; then RESOLVED[$key]=ok
+    elif in_waived "$p"; then RESOLVED[$key]=waived
+    elif [ -z "$repo_root" ]; then
+      # No sibling could be named, so a qualifier was not read: not a verdict.
+      could_not_run "${f}:${ln} ${p} -- not found here, and no sibling could be read"
+      return 0
+    else RESOLVED[$key]=bad; fi
   fi
-  case "${RESOLVED[$p]}" in
-    ok)     n_ok=$((n_ok + 1)) ;;
-    waived) echo "  WAIVED   ${f}:${ln} ${p}  (listed in ${IGNORE})"; n_waived=$((n_waived + 1)) ;;
-    bad)    echo "  DANGLING ${f}:${ln} ${p}"; n_bad=$((n_bad + 1)); defects=$((defects + 1)) ;;
+  local in=""
+  [ -z "$name" ] || in=" (in ${name})"
+  case "${RESOLVED[$key]}" in
+    ok)
+      if [ -n "$name" ]; then echo "  ELSEWHERE ${f}:${ln} ${p}${in}"; n_else=$((n_else + 1))
+      else n_ok=$((n_ok + 1)); fi ;;
+    waived) echo "  WAIVED   ${f}:${ln} ${p}${in}  (listed in ${IGNORE})"; n_waived=$((n_waived + 1)) ;;
+    bad)    echo "  DANGLING ${f}:${ln} ${p}${in}"; n_bad=$((n_bad + 1)); defects=$((defects + 1)) ;;
   esac
 }
 
-# scan_refs <file>: brief-check's extraction, kept line-numbered. A path is a
-# tracked top-level directory followed by /[A-Za-z0-9._/-]*, not preceded by a
-# path character or ~ (absolute paths, ~ paths and URLs are machines' and
-# remotes' business); trailing .,:;) trimmed. Each distinct path in a file is
-# reported once, at its first line.
+# scan_refs <file>: each citation of the file. A raw match holding ... is prose,
+# tested before the trim because docs/... trims to docs/, which resolves;
+# printed once per file, line and match. Otherwise the trailing .,:;) is trimmed
+# and each distinct pair of repo and path is reported once, at its first line.
 scan_refs() {
-  local f="$1" matches m ln rest p seen=""
+  local f="$1" ln raw name p
+  local -A seen=()
   n_files=$((n_files + 1))
-  matches="$(grep -noE "(^|[^A-Za-z0-9._/~-])(${roots})/[A-Za-z0-9._/-]*" "$f" || true)"
-  [ -n "$matches" ] || return 0
-  while IFS= read -r m; do
-    ln="${m%%:*}"; rest="${m#*:}"
-    p="$(printf '%s\n' "$rest" | grep -oE "(${roots})/[A-Za-z0-9._/-]*" | head -1 | sed 's/[.,:;)]*$//')"
+  if ! cite_scan "$f" > "$TMP/cites"; then could_not_run "${f}: its citations (awk failed) -- not scanned"; return 0; fi
+  while IFS=$'\037' read -r ln raw name; do
+    if [[ "$raw" == *...* ]]; then
+      [ -z "${seen[prose|$ln|$raw]+x}" ] || continue
+      seen[prose|$ln|$raw]=1
+      echo "  PROSE    ${f}:${ln} ${raw}"; n_prose=$((n_prose + 1))
+      continue
+    fi
+    p="$raw"
+    while [[ "$p" == *[.,:\;\)] ]]; do p="${p%?}"; done
     [ -n "$p" ] || continue
-    printf '%s\n' "$seen" | grep -Fxq -- "$p" && continue
-    seen="${seen}${p}"$'\n'
-    resolve "$f" "$ln" "$p"
-  done <<< "$matches"
+    [ -z "${seen[$name|$p]+x}" ] || continue
+    seen[$name|$p]=1
+    resolve "$f" "$ln" "$p" "$name"
+  done < "$TMP/cites"
 }
 
 # Which files are living documents (without path arguments): every tracked
@@ -568,7 +733,7 @@ if gz "$TMP/roots" ls-tree -d --name-only -z HEAD; then
 else
   could_not_run "the path roots (git ls-tree failed) -- the reference check did not run"
 fi
-echo "  ${n_files} file(s) scanned: ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling"
+echo "  ${n_files} file(s) scanned: ${n_ok} resolved, ${n_waived} waived, ${n_bad} dangling, ${n_else} in other repos, ${n_prose} prose"
 if [ "$n_bad" -gt 0 ]; then
   echo "  -> the file was never written (write it), it was renamed (fix the reference), or its"
   echo "     absence is intentional (add the path to ${IGNORE} with a comment saying why)"
@@ -612,15 +777,26 @@ judge_required_field() {
   fi
 }
 
+# drop_number <heading>: the heading with a leading "N. " after "## " removed.
+# A required heading's number is not its identity: a project may renumber its
+# sections (docs/specs/check-revision-v1.15.0.md 4.5).
+drop_number() {
+  if [[ "$1" =~ ^##\ [0-9]+\.\ (.*)$ ]]; then printf '## %s' "${BASH_REMATCH[1]}"
+  else printf '%s' "$1"; fi
+}
+
 # judge_required_section <doc> <match text> <exact|prefix>: a line equal to
-# the match text (no [ in the template heading) or starting with it. A
-# trailing marker on the document's line is ignored, as for fields.
+# the match text (no [ in the template heading) or starting with it, each with
+# its number dropped. A trailing marker on the document's line is ignored, as
+# for fields. The finding prints the template's text.
 judge_required_section() {
-  local doc="$1" match="$2" mode="$3" line hit=false
+  local doc="$1" match="$2" mode="$3" line want hit=false
+  want="$(drop_number "$match")"
   while IFS= read -r line; do
     line="$(printf '%s' "$line" | sed -E "s/[[:space:]]*${MARKER}[[:space:]]*\$//")"
-    if [ "$mode" = exact ]; then [ "$line" = "$match" ] && { hit=true; break; }
-    else starts_with "$line" "$match" && { hit=true; break; }
+    line="$(drop_number "$line")"
+    if [ "$mode" = exact ]; then [ "$line" = "$want" ] && { hit=true; break; }
+    else starts_with "$line" "$want" && { hit=true; break; }
     fi
   done < <(grep -E '^## ' "$(unfenced "$doc")" || true)
   $hit || finding REQUIRED "$doc" "section \"${match}\" missing"
@@ -691,6 +867,125 @@ for i in "${!PLANNING_DOCS[@]}"; do
 done
 echo "  ${n_req_checked} checked, ${n_absent} absent, $((defects - req_before)) defect line(s), ${n_req_unknown} could not run"
 
+# ---------------------------------------------------------- 4.7 review dates
+
+echo
+echo "== review dates -- is any decision past its date? =="
+
+rev_before=$defects
+n_rev_ok=0; n_rev_predate=0; n_rev_skip=0
+REVIEW_LABEL="Review by"
+
+# valid_date <token>: the form, and date printing the token back: date alone
+# accepts `tomorrow`, which would renew itself. Its stderr is discarded because
+# refusing a bad date is the case this test exists for, read on this machine
+# for 2026-13-40 and 2026-02-30, and the caller names the date as unreadable.
+valid_date() {
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [ "$(date -u -d "$1" +%F 2>/dev/null)" = "$1" ]
+}
+# judge_date <where> <token>: past, too far out, or unreadable. Day differences
+# from UTC epochs. A date too far off reads as reviewed for as long as it stays
+# ahead (PROJECT-INSTRUCTIONS.md: a freshness check bounds age on both sides).
+judge_date() {
+  local where="$1" tok="$2" days
+  if ! valid_date "$tok"; then finding REVIEW "$where" "review date unreadable"; return 0; fi
+  days=$(( ($(date -u -d "$tok" +%s) - today_epoch) / 86400 ))
+  if [ "$days" -lt 0 ]; then
+    finding REVIEW "$where" "past its date (${tok})"
+  elif [ "$days" -gt 730 ]; then
+    finding REVIEW "$where" "${tok} is more than 730 days out"
+  else
+    n_rev_ok=$((n_rev_ok + 1))
+  fi
+}
+# judge_review <adr> <named true|false>: named is a path argument; otherwise a
+# missing field is a defect only on an ADR is_gated selects with this block's
+# cutoff, so the ADRs that predate the field stay exempt.
+judge_review() {
+  local f="$1" named="$2" status first n val tok rest rc
+  status="$(field_value "$f" Status)"; first="${status%% *}"
+  if [ "$first" = SUPERSEDED ]; then
+    echo "  skipped  ${f} (SUPERSEDED)"; n_rev_skip=$((n_rev_skip + 1)); return 0
+  fi
+  n="$(field_count "$f" "$REVIEW_LABEL")"
+  if [ "$n" -gt 1 ]; then finding REVIEW "$f" "field appears ${n} times -- exactly once"; return 0; fi
+  if [ "$n" -eq 1 ]; then
+    val="$(field_value "$f" "$REVIEW_LABEL")"
+    read -r tok rest <<< "$val" || true
+    judge_date "$f" "${tok:-}"
+    return 0
+  fi
+  if [ "$first" != ACCEPTED ]; then n_rev_predate=$((n_rev_predate + 1)); return 0; fi
+  if $named; then finding REVIEW "$f" "no **Review by:** line"; return 0; fi
+  if is_gated "$f" adr "${STAT[$f]-}" "$review_cutoff"; then
+    finding REVIEW "$f" "no **Review by:** line"
+  else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then could_not_run "${f}: its history (git log failed) -- review not judged"; return 0; fi
+    n_rev_predate=$((n_rev_predate + 1))
+  fi
+}
+# judge_profile: upstream only. Downstream the profile is a stamped copy: a date
+# there would fail every project for one decision. An unreadable date is named
+# too: a check does not pass what it could not read.
+judge_profile() {
+  local n_dated=0 hit ln text tok n
+  if [ ! -f OPERATOR-PROFILE.md ]; then
+    could_not_run "OPERATOR-PROFILE.md not present -- no dated line was read"
+    return 0
+  fi
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    ln="${hit%%:*}"; text="${hit#*:}"
+    n_dated=$((n_dated + 1))
+    n="$(grep -oE '\(review by [^)]*\)' <<< "$text" | wc -l)"
+    if [ "$n" -gt 1 ]; then finding REVIEW "OPERATOR-PROFILE.md:${ln}" "field appears ${n} times -- exactly once"; continue; fi
+    tok="$(grep -oE '\(review by [^)]*\)' <<< "$text" | sed -E 's/^\(review by //; s/\)$//')"
+    judge_date "OPERATOR-PROFILE.md:${ln}" "$tok"
+  done <<< "$(grep -nE '\(review by [^)]*\)' "$(unfenced OPERATOR-PROFILE.md)" || true)"
+  echo "  ${n_dated} dated line(s) in OPERATOR-PROFILE.md"
+}
+
+review_block() {
+  local c cut_out
+  # The template first, from the working tree. No field there is neither a
+  # defect nor could-not-run, so a repo mid-sync and the commit that fixes it
+  # are not refused.
+  if [ ! -r "$ADR_TEMPLATE" ] || [ "$(field_count "$ADR_TEMPLATE" "$REVIEW_LABEL")" -eq 0 ]; then
+    echo "  the ADR template has no Review by field -- not judged"
+    return 0
+  fi
+  TODAY="${SCAFFOLD_TODAY:-$(date -u +%F)}"
+  if ! valid_date "$TODAY"; then could_not_run "today's date ('${TODAY}' is not a date) -- review dates were not judged"; return 0; fi
+  today_epoch="$(date -u -d "$TODAY" +%s)"
+  if $WITH_PATHS; then
+    for c in ${ARGS[@]+"${ARGS[@]}"}; do
+      [ "$(header_kind "$c")" = adr ] && judge_review "$c" true
+    done
+  else
+    # The oldest commit that added the field; HEAD when it is not yet committed.
+    if g cut_out log --format=%H -S'**Review by:**' -- "$ADR_TEMPLATE"; then
+      review_cutoff="$(printf '%s\n' "$cut_out" | tail -n 1)"
+      [ -n "$review_cutoff" ] || review_cutoff=HEAD
+      echo "  cutoff: ${review_cutoff} (the oldest commit adding the field)"
+      if [ -f "$TMP/cands" ]; then
+        while IFS= read -r -d '' c; do
+          [ "$(header_kind "$c")" = adr ] || continue
+          [ -f "$c" ] || continue
+          judge_review "$c" false
+        done < "$TMP/cands"
+      else
+        could_not_run "the ADR list (the header gate did not run) -- review dates were not judged"
+      fi
+    else
+      could_not_run "the review cutoff (git log failed) -- review dates were not judged"
+    fi
+    if is_upstream; then judge_profile; fi
+  fi
+  echo "  ${n_rev_ok} in bounds, $((defects - rev_before)) defect line(s), ${n_rev_predate} predate the field, ${n_rev_skip} superseded"
+}
+review_block
+
 # ------------------------------------------------------------------- verdict
 
 echo
@@ -702,5 +997,5 @@ if [ "$unknown" -gt 0 ]; then
   echo "unknown -- ${unknown} check(s) could not run"
   exit $EXIT_UNKNOWN
 fi
-echo "sound -- headers complete, references resolve or are waived, required lines present"
+echo "sound -- headers complete, references resolve or are waived, required lines present, review dates in bounds"
 exit $EXIT_SOUND
