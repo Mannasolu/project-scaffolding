@@ -388,18 +388,42 @@ elif ! printf '%s\n' "$stamps" | grep -qE "$STAMP_RE"; then
   defects=$((defects + 1))
 else
   sha="$(printf '%s\n' "$stamps" | awk '{print $2}')"
-  # One read cannot separate "names no commit" from "could not read": an absent
-  # sha, a tree, a blob and an unreadable pack can all exit 1, some silently. So
-  # a stamp that does not resolve is judged by a second read: HEAD reading proves
-  # the object store answers, and the answer about the stamp stands.
-  if git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null 2>"$GIT_ERR"; then
+  # A stamp that does not resolve is a defect only when the absence is proven.
+  # A tree or a blob reads, so its type is the answer. Otherwise the object did
+  # not read, and "absent" must beat every other cause: the first read failed
+  # with no noise, the history is not shallow, and every ref's history reads. An
+  # unreadable pack fails silently, so only the walk finds it; a read of HEAD
+  # proves HEAD. The walk sees reachable history only: a stamp on no ref, alone
+  # in an unreadable pack, still reads as absent. Replace refs are not read: the
+  # question is what the store holds.
+  rc=0
+  GIT_NO_REPLACE_OBJECTS=1 git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null 2>"$GIT_ERR" || rc=$?
+  if [ "$rc" -eq 0 ]; then
     echo "  ${sha} -- well-formed, commit exists"
-  elif git cat-file -e 'HEAD^{commit}' 2>"$GIT_ERR"; then
-    echo "  ${sha} -- well-formed, but no such commit in this repo"
-    defects=$((defects + 1))
   else
-    sed 's/^/    /' "$GIT_ERR"
-    could_not_run "the stamp's commit (HEAD does not read either) -- ${sha} was not judged"
+    kind="$(GIT_NO_REPLACE_OBJECTS=1 git cat-file -t "${sha}^{}" 2>"$TMP/stamp.type.err")" || kind=""
+    why=""
+    case "$kind" in
+      tree|blob) ;;
+      ?*) why="the read failed" ;;
+      *)
+        shallow="$(git rev-parse --is-shallow-repository 2>"$TMP/stamp.shallow.err")" || shallow=""
+        if [ "$rc" -gt 1 ] || [ -s "$GIT_ERR" ] || [ -z "$shallow" ]; then
+          why="the read failed"
+        elif [ "$shallow" != false ]; then
+          why="a shallow history cannot prove it absent"
+        elif ! GIT_NO_REPLACE_OBJECTS=1 git -c core.commitGraph=false rev-list --quiet --all 2>"$TMP/stamp.walk.err"; then
+          why="the history does not read"
+        fi ;;
+    esac
+    if [ -z "$why" ]; then
+      echo "  ${sha} -- well-formed, but no such commit in this repo"
+      defects=$((defects + 1))
+    else
+      echo "  git rev-parse --verify ${sha}^{commit} exited ${rc}:"
+      cat "$GIT_ERR" "$TMP"/stamp.*.err | sed 's/^/    /' || true
+      could_not_run "the stamp's commit (${why}) -- ${sha} was not judged"
+    fi
   fi
 fi
 

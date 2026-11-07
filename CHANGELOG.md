@@ -6,6 +6,22 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.15.1
+
+No upgrade note: no document changed, so no Instructions field needs a re-paste.
+
+- `bin/scaffold-brief-check`: a stamp that does not resolve is called "no such
+  commit" only when the absence is proven: the object does not read, the read
+  failed with no noise, the history is not shallow, and every ref's history
+  reads. A tree or a blob stays a defect. Anything else is could-not-run, exit 2,
+  and prints each read's own error. Replace refs are not read: the question is
+  what the store holds.
+  *Cost: 1.15.0 judged the stamp by a read of `HEAD`, which proves `HEAD`'s object
+  and nothing else. A commit that existed and could not be read was reported as
+  never having existed, and the test clause that would have caught it had been
+  deleted in the same change. Found by a cold read of the release's last fix, the
+  one change that shipped without one.*
+
 ## 1.15.0
 
 **Upgrade note: the next closeout where an open item leaves the brief must name
