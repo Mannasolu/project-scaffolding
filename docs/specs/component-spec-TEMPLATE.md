@@ -12,8 +12,10 @@
 
 **Status:** DRAFT | AGREED | BUILT
 **Owner / role:** [who or which role owns this -- e.g. backend architect]
-**Executor model:** [the exact model the builder runs with, named in the
-command -- e.g. `claude --model <name>`. Never left to a runner's default.]
+**Executor model:** [the order the builder's session opens on, as
+bin/scaffold-launch probes it -- e.g. fable, then opus; the launch
+record names the model id that ran. Never a runner's
+default.]
 **Session:** [the repo and session that issued this spec -- e.g.
 `project-a session 012`]
 **Depends on:** [other components or specs this needs; "none" if standalone]

@@ -26,7 +26,9 @@
   on the network is bounded, and a timeout prints as a failure. A bound covers
   what a step waits on: a command that starts or waits for a service doing
   network I/O is a network step and gets its own bound, even when the network
-  call is inside the service.
+  call is inside the service. A bound carries a signal the bounded command
+  cannot ignore, a command that does not need the terminal is taken off it,
+  and a bound is proven by a run that hits it.
 - **The correction word is "decide."** When it's said, the previous turn offered
   a choice that should have been made. Make it and continue -- no apology, no
   recap.
@@ -202,6 +204,14 @@ printed the repo state, the fetch and the reader's report into context, and
 blocked. Judge the report before any work. The brief's "Opening the next
 chat" block is for a claude.ai chat (its route B); do not run it in Claude
 Code.
+
+**The session is opened by `bin/scaffold-launch`.** It probes the
+project's model order, opens the session on the first available model
+and writes a record under the state directory the opening gate owns:
+the model opened, before the session starts, and the models that
+answered, from the transcript, after it ends. The session log quotes
+the record, never recall; inside the session the record is
+`${XDG_STATE_HOME:-$HOME/.local/state}/scaffolding/launch/<repo>/$CLAUDE_CODE_SESSION_ID.record`.
 
 **The first message.** The operator's first message may be only `start`.
 Take it as: this is the session named in the brief's "Opening the next chat

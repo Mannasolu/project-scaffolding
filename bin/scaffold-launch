@@ -1,0 +1,604 @@
+#!/usr/bin/env bash
+# Open a Claude Code session in this repo on the strongest available model,
+# and record what was opened and what answered (docs/specs/scaffold-launch.md;
+# ADR-011, ADR-012).
+#
+# In order: refuse a tree with uncommitted changes; probe each model in the
+# order with one print-mode turn and classify the answer from its machine
+# fields, never its prose; write a record of what is about to be opened, then
+# open the session on the first available model under a session id chosen
+# here; when the session ends, read its transcript for the models that
+# actually answered and append them to the record. The session log quotes the
+# record.
+#
+# Usage: bin/scaffold-launch [--allow-dirty] [--probe-only] [--models <m1,m2,...>] [--probe-timeout <seconds>] [-- <arguments passed to claude>]
+#
+# Run in your own terminal, from anywhere inside the repo. Never inside a
+# session: an agent that ran this would open an interactive session in its
+# shell and hang.
+#
+# Environment:
+#   SCAFFOLD_CLAUDE         the executable for every probe and the launch
+#                           (default: claude, on PATH)
+#   SCAFFOLD_LAUNCH_STATE   (tests only) the record directory; default
+#                           ${XDG_STATE_HOME:-$HOME/.local/state}/scaffolding/launch
+#   CLAUDE_CONFIG_DIR       the transcript is read under
+#                           ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/
+#   SCAFFOLD_LAUNCH_HOLD    (tests only) a path; the launcher waits, after the
+#                           record is written, until it exists (30 s at most)
+#
+# Exit codes:
+#   the session's own   the session ran; its code is passed through unchanged
+#   0    --probe-only found an available model, or --help
+#   64   usage, a refused pass-through argument, or run inside a session
+#   65   the tree: not a git repository, git status failed, or not clean
+#        without --allow-dirty
+#   69   jq or setsid is not on PATH
+#   70   could not proceed: the version read failed or hit its bound, no uuid
+#        source, a probe FAILED or COULD NOT READ, the hold hit its bound
+#   73   the record or its pointer could not be written and read back by hash
+#   75   every model in the order is UNAVAILABLE: the work waits
+#   124  a probe TIMED OUT
+#   127  the claude executable is not found or not executable
+#   130  interrupted before the launch; nothing launched, no record left
+#
+# No stderr is discarded on a path whose failure has not been seen: a probe
+# that FAILED or COULD NOT READ has its raw output printed under its line.
+# The script names no project, person or machine; it ships to the public
+# export under its leak guard.
+set -uo pipefail
+
+# The order implements OPERATOR-PROFILE.md, "Strongest available model,
+# falling back automatically" (review by 2027-05-07): Claude Code's aliases
+# for the latest of each, so the order names no release. A change to the
+# profile's order changes this constant in the same commit.
+DEFAULT_ORDER=fable,opus
+
+# unset means claude; set and empty is an error (exit 127), never a default
+CLAUDE="${SCAFFOLD_CLAUDE-claude}"
+STATE="${SCAFFOLD_LAUNCH_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/scaffolding/launch}"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+VERSION_BOUND=20
+HOLD_BOUND=30
+
+usage() {
+  cat <<'USAGE'
+Usage: bin/scaffold-launch [--allow-dirty] [--probe-only] [--models <m1,m2,...>] [--probe-timeout <seconds>] [-- <arguments passed to claude>]
+
+  --models <m1,m2,...>        the order to probe; each name lower case
+                              letters, digits, '.' and '-'
+                              (default: the script's DEFAULT_ORDER)
+  --probe-timeout <seconds>   the bound on each probe, 1 to 600 (default 60)
+  --allow-dirty               open the session although the tree is not clean
+  --probe-only                probe and print the verdicts; write no record,
+                              open no session
+  --                          everything after it is passed to claude
+                              (refused: arguments that resume another
+                              session, set the session id, the model or
+                              print mode, detach the session, move it to
+                              a worktree, or run no session at all: a
+                              subcommand, --help, --version. Short options
+                              are written apart, one per argument. A
+                              refused word is refused wherever it stands;
+                              when it is really another option's value,
+                              give it as --option=value)
+  --help                      print this and exit 0
+
+Run in your own terminal, from inside the repo whose session is opened.
+USAGE
+}
+usage_error() { echo "scaffold-launch: $1" >&2; usage >&2; exit 64; }
+
+# oneline <value>: a value never holds a newline; one that would is replaced
+# by its first line and " [truncated]". Any other control character becomes
+# a space, and the value then says so: what is recorded is never silently
+# different from what was read.
+oneline() {
+  local v="$1" t="" c
+  # bytes below 0x20 and 0x7f, whatever the locale: the same set the
+  # transcript read replaces
+  local LC_ALL=C
+  case "$v" in *$'\n'*) v="${v%%$'\n'*}"; t=" [truncated]" ;; esac
+  c="${v//[[:cntrl:]]/ }"
+  [ "$c" = "$v" ] || t=" [control characters replaced]$t"
+  printf '%s%s' "$c" "$t"
+}
+# field <value>: one field of a space-separated line: oneline, spaces
+# written as "_", and "-" for an empty value, so the fields never shift.
+field() { local v; v="$(oneline "$1")"; v="${v// /_}"; printf '%s' "${v:--}"; }
+now_stamp() { date +%Y-%m-%dT%H:%M:%S%z; }
+# now_us: microseconds since the epoch, digits only, whatever the locale's
+# decimal mark.
+now_us() { local t="$EPOCHREALTIME"; printf '%s' "${t//[^0-9]/}"; }
+# tenths <microseconds>: seconds with one decimal.
+tenths() { local t=$(( ($1 + 50000) / 100000 )); printf '%d.%d' $(( t / 10 )) $(( t % 10 )); }
+sha_of_text() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+sha_of_file() { sha256sum < "$1" | cut -d' ' -f1; }
+indent() { sed 's/^/      /'; }
+
+# ---- 4.1 step 1: never inside a session -----------------------------------
+if [ -n "${CLAUDECODE+x}" ]; then
+  echo "scaffold-launch runs in your own terminal, not inside a session" >&2
+  exit 64
+fi
+
+# ---- 4.1 step 2: arguments ------------------------------------------------
+ORDER="$DEFAULT_ORDER"
+PROBE_TIMEOUT=60
+ALLOW_DIRTY=false
+PROBE_ONLY=false
+PASS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --help) usage; exit 0 ;;
+    --allow-dirty) ALLOW_DIRTY=true; shift ;;
+    --probe-only) PROBE_ONLY=true; shift ;;
+    --models)
+      [ $# -ge 2 ] || usage_error "--models needs a value"
+      ORDER="$2"; shift 2 ;;
+    --probe-timeout)
+      [ $# -ge 2 ] || usage_error "--probe-timeout needs a value"
+      PROBE_TIMEOUT="$2"; shift 2 ;;
+    --) shift; PASS=("$@"); break ;;
+    -*) usage_error "unknown option: $1" ;;
+    *) usage_error "unexpected argument before --: $1" ;;
+  esac
+done
+[[ "$ORDER" =~ ^[a-z0-9][a-z0-9.-]*(,[a-z0-9][a-z0-9.-]*)*$ ]] \
+  || usage_error "--models: '$ORDER' is not a comma-separated list of model names"
+if ! [[ "$PROBE_TIMEOUT" =~ ^[0-9]{1,3}$ ]] || [ "$((10#$PROBE_TIMEOUT))" -lt 1 ] || [ "$((10#$PROBE_TIMEOUT))" -gt 600 ]; then
+  usage_error "--probe-timeout: '$PROBE_TIMEOUT' is not an integer from 1 to 600"
+fi
+PROBE_TIMEOUT="$((10#$PROBE_TIMEOUT))"
+IFS=, read -r -a MODELS <<< "$ORDER"
+# Refused after --: another session's id (the transcript would not be this
+# launch's), what the launcher sets itself, a session that would not run
+# under this process in this terminal, and a worktree (the transcript's
+# directory would be another's). From the 2.1.319 help text, read again on
+# 2.1.330 (--tmux and --environment joined, and the four flags that print
+# and exit); a later version's new flags of these kinds join the list.
+# The list is matched on whole arguments wherever they stand, so a value
+# that equals a refused word is refused too; a single dash with more than
+# one character after it (-vh, -rNAME) is refused because it can hide any of
+# the short forms; a subcommand runs no session, so a record would describe
+# nothing (the names are the 2.1.330 help text's).
+# A long option that abbreviates a refused one (--resum, --mod) is refused
+# with it: whether the CLI accepts unique prefixes is unread. A refused word
+# that is really another option's value is given as --option=value, which
+# is matched on the option's name alone; a number (-5) is not a cluster.
+REFUSED_LONG=(--resume --continue --fork-session --from-pr --teleport --session-id --model --print --bg --background --desktop --cloud --environment --help --version --worktree --tmux)
+for a in "${PASS[@]}"; do
+  case "$a" in
+    -[0-9]*) ;;
+    -[!-]?*) usage_error "refused after --: $a (short options are written apart, one per argument; a value that begins with a dash is given as --option=value)" ;;
+    agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade)
+      usage_error "refused after --: $a (a claude subcommand; no session would run. If it is another option's value, give it as --option=value)" ;;
+  esac
+  name="${a%%=*}"
+  if [ "${#name}" -ge 3 ] && [ "${name#--}" != "$name" ]; then
+    for r in "${REFUSED_LONG[@]}"; do
+      if [ "$r" != "$name" ] && [ "${r#"$name"}" != "$r" ]; then
+        usage_error "refused after --: $a (it abbreviates $r, which is refused)"
+      fi
+    done
+  fi
+  case "$name" in
+    --resume|-r|--continue|-c|--fork-session|--from-pr|--teleport)
+      usage_error "refused after --: $a (another session's id; the record would describe nothing)" ;;
+    --session-id|--model|-p|--print)
+      usage_error "refused after --: $a (the launcher sets it)" ;;
+    --bg|--background|--desktop|--cloud|--environment)
+      usage_error "refused after --: $a (the session would not run under this process)" ;;
+    -h|--help|-v|--version)
+      usage_error "refused after --: $a (no session would run, and a record would describe nothing)" ;;
+    -w|--worktree|--tmux)
+      usage_error "refused after --: $a (the session's directory would be the worktree)" ;;
+  esac
+done
+
+# ---- 4.1 steps 3 and 4: what every probe needs ----------------------------
+for dep in jq setsid timeout; do
+  if ! command -v "$dep" > /dev/null; then
+    echo "scaffold-launch: $dep is not on PATH; every probe needs it" >&2
+    exit 69
+  fi
+done
+# The executable is resolved once, here, to an absolute path: what is checked
+# is what runs, whatever directory the launcher moves to and whatever a
+# relative PATH entry would find there. A name that resolves to no file (a
+# shell builtin or function) is not an executable.
+RESOLVED="$(command -v "$CLAUDE")" || RESOLVED=""
+case "$RESOLVED" in
+  /*) ;;
+  */*) RESOLVED="$PWD/$RESOLVED" ;;
+  *) echo "scaffold-launch: '$CLAUDE' is not found or not executable (SCAFFOLD_CLAUDE names another)" >&2
+     exit 127 ;;
+esac
+CLAUDE="$RESOLVED"
+# The two directories too, before the cd to the top level. The configuration
+# directory is the session's as well as the launcher's, so the absolute form
+# is exported: the session writes its transcript where the launcher reads it.
+case "$STATE" in /*) ;; *) STATE="$PWD/$STATE" ;; esac
+case "$CONFIG_DIR" in /*) ;; *) CONFIG_DIR="$PWD/$CONFIG_DIR"; export CLAUDE_CONFIG_DIR="$CONFIG_DIR" ;; esac
+
+# ---- the scratch directory and the handler, before anything that waits -----
+SCRATCH="$(mktemp -d)" || { echo "scaffold-launch: no scratch directory" >&2; exit 70; }
+trap 'rm -rf "${SCRATCH:?}"' EXIT
+
+PROBE_PID=""
+PROBING=false
+PREV_BG=""
+VERSION_PID=""
+PROBE_MODEL=""
+REC=""
+REC_TMP=""
+# The handler before the launch, armed from here until 4.3 step 3 replaces
+# it. While a probe's pid is set it ends the probe: the probe is in its own
+# session (setsid), so a terminal's Ctrl-C never reaches it by itself. With
+# no pid set it ends a version read still running and removes whatever 4.3
+# step 2 has written. A signal between a probe's start and the assignment of
+# its pid finds the pid in $!, and only when $! has changed since before the
+# probe: a $! that still names the previous job is not this probe.
+on_interrupt() {
+  local err
+  if $PROBING && [ -z "$PROBE_PID" ] && [ "${!:-}" != "$PREV_BG" ]; then PROBE_PID="${!:-}"; fi
+  if [ -n "$PROBE_PID" ]; then
+    if ! err="$(kill -TERM -- "-$PROBE_PID" 2>&1)"; then
+      echo "interrupt: group kill failed ($(oneline "$err")); sent TERM to pid $PROBE_PID"
+      kill -TERM "$PROBE_PID"
+    fi
+    echo "interrupted: during the probe of $PROBE_MODEL; nothing launched"
+  else
+    [ -n "$VERSION_PID" ] && kill -TERM "$VERSION_PID" 2> /dev/null
+    [ -n "$REC_TMP" ] && rm -f -- "$REC_TMP"
+    [ -n "$REC" ] && rm -f -- "$REC"
+    echo "interrupted: before launch; nothing launched"
+  fi
+  exit 130
+}
+trap on_interrupt INT TERM HUP
+
+# ---- 4.1 step 5: the repo -------------------------------------------------
+if ! TOP="$(GIT_OPTIONAL_LOCKS=0 git rev-parse --show-toplevel)"; then
+  echo "scaffold-launch: not inside a git repository; nothing probed" >&2
+  exit 65
+fi
+REPO="$(basename "$TOP")"
+cd "$TOP" || { echo "scaffold-launch: cannot enter $TOP" >&2; exit 65; }
+echo "repo:     $TOP"
+
+# ---- 4.1 step 6: the version, bounded -------------------------------------
+# In the background under wait, as the probes are: bash runs a trap at once
+# when it is waiting, and only after a foreground command returns.
+t0="$(now_us)"
+timeout -k 5 "$VERSION_BOUND" "$CLAUDE" --version > "$SCRATCH/version.out" 2> "$SCRATCH/version.err" < /dev/null &
+VERSION_PID=$!
+wait "$VERSION_PID"; rc=$?
+VERSION_PID=""
+VERSION_OUT="$(cat "$SCRATCH/version.out")"
+waited=$(( ($(now_us) - t0) / 1000000 ))
+# The bound is reported only when the wait reached it: a 124 or a 137 before
+# it is the command's own exit, or a kill from elsewhere.
+if { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; } && [ "$waited" -ge "$VERSION_BOUND" ]; then
+  echo "scaffold-launch: '$CLAUDE --version' did not answer within its ${VERSION_BOUND} s bound (exit $rc); nothing probed" >&2
+  { printf '%s\n' "$VERSION_OUT"; cat "$SCRATCH/version.err"; } | indent >&2
+  exit 70
+fi
+CLAUDE_VERSION="$(oneline "${VERSION_OUT%%$'\n'*}")"
+if [ "$rc" -ne 0 ] || [ -z "$CLAUDE_VERSION" ]; then
+  echo "scaffold-launch: '$CLAUDE --version' failed (exit $rc after ${waited}s); nothing probed. Its output:" >&2
+  { printf '%s\n' "$VERSION_OUT"; cat "$SCRATCH/version.err"; } | indent >&2
+  exit 70
+fi
+echo "claude:   $CLAUDE_VERSION"
+
+# ---- 4.1 step 7: the tree, before any probe, so a refusal spends nothing --
+TREE_RECORD=""
+check_tree() {
+  local listing n
+  if ! listing="$(GIT_OPTIONAL_LOCKS=0 git status --porcelain)"; then
+    echo "scaffold-launch: git status failed; nothing probed" >&2
+    exit 65
+  fi
+  if [ -z "$listing" ]; then
+    echo "tree:     clean"
+    TREE_RECORD="clean"
+    return 0
+  fi
+  n="$(printf '%s\n' "$listing" | wc -l)"; n="$((n))"
+  if $ALLOW_DIRTY; then
+    echo "tree:     NOT CLEAN, --allow-dirty given -- $n paths (listed below)"
+    printf '%s\n' "$listing" | indent
+    TREE_RECORD="not clean, --allow-dirty given ($n paths)"
+    return 0
+  fi
+  echo "tree:     NOT CLEAN -- $n paths (listed below)"
+  printf '%s\n' "$listing" | indent
+  echo "commit first, or pass --allow-dirty for a session that must finish uncommitted work" >&2
+  exit 65
+}
+
+# ---- 4.2: probe and classify ----------------------------------------------
+LAUNCH_MODEL=""
+PROBE_RECORD=()
+N_PROBE=0
+# show_raw <stdout file> <stderr file>: the durable evidence of a probe that
+# FAILED or COULD NOT READ; the scratch files are gone at exit.
+show_raw() {
+  echo "      stdout:"; sed 's/^/        /' "$1"
+  echo "      stderr:"; sed 's/^/        /' "$2"
+}
+probe_models() {
+  local m out err t0 us secs whole rc is_error status api_error nkeys keys canonical shown
+  for m in "${MODELS[@]}"; do
+    N_PROBE=$((N_PROBE + 1))
+    out="$SCRATCH/probe-$N_PROBE.out"; err="$SCRATCH/probe-$N_PROBE.err"
+    PROBE_MODEL="$m"
+    t0="$(now_us)"
+    PREV_BG="${!:-}"; PROBING=true
+    setsid timeout -k 5 "$PROBE_TIMEOUT" "$CLAUDE" -p --safe-mode --model "$m" --output-format json --tools "" --no-session-persistence --permission-prompts none --effort low 'Reply with the single word ok.' < /dev/null > "$out" 2> "$err" &
+    PROBE_PID=$!
+    wait "$PROBE_PID"; rc=$?
+    PROBE_PID=""; PROBING=false
+    us=$(( $(now_us) - t0 )); secs="$(tenths "$us")"; whole=$(( us / 1000000 ))
+
+    # 1. the bound. A hang is not read as "unavailable".
+    if [ "$rc" -eq 124 ] || { [ "$rc" -eq 137 ] && [ "$whole" -ge "$PROBE_TIMEOUT" ]; }; then
+      echo "probe:    $m -- TIMED OUT after ${PROBE_TIMEOUT}s (exit $rc)"
+      exit 124
+    fi
+    if [ "$rc" -eq 137 ]; then
+      echo "probe:    $m -- COULD NOT READ -- killed after ${whole}s, before the bound"
+      show_raw "$out" "$err"
+      exit 70
+    fi
+    # 2. one JSON object on stdout, or nothing is read from it.
+    if [ ! -s "$out" ] || ! jq -es 'length == 1 and (.[0] | type) == "object"' "$out" > /dev/null 2> "$SCRATCH/jq.err"; then
+      echo "probe:    $m -- COULD NOT READ -- no single JSON object on stdout (exit $rc)"
+      show_raw "$out" "$err"
+      exit 70
+    fi
+    # Only the machine fields are read: .subtype, .result and .stop_reason
+    # never are (a 429 carries "subtype":"success").
+    is_error="$(jq -r '.is_error | if . == true then "true" elif . == false then "false" else "other" end' "$out")"
+    status="$(jq -r '.api_error_status | if . == null then "null" else tostring end' "$out")"
+    api_error="$(field "$(jq -r '.api_error | if type == "string" then . else tojson end' "$out")")"
+    # 3. an error: unavailable on 429 and on 5xx, a failure otherwise.
+    if [ "$is_error" = true ]; then
+      if jq -e '.api_error_status | type == "number" and (. == 429 or (. >= 500 and . <= 599))' "$out" > /dev/null; then
+        echo "probe:    $m -- UNAVAILABLE ($status $api_error, ${secs}s)"
+        PROBE_RECORD+=("probe: $m UNAVAILABLE $status $api_error $secs")
+        continue
+      fi
+      echo "probe:    $m -- FAILED ($status $api_error)"
+      show_raw "$out" "$err"
+      exit 70  # a FAILED verdict stops: the fault is not the model's
+    fi
+    # 4. an answer: the keys of .modelUsage are the models that answered.
+    if [ "$is_error" = false ]; then
+      if [ "$status" != null ]; then
+        echo "probe:    $m -- COULD NOT READ -- is_error false with api_error_status $status"
+        show_raw "$out" "$err"
+        exit 70
+      fi
+      nkeys="$(jq -r '.modelUsage | if type == "object" then length else 0 end' "$out")"
+      if [ "$nkeys" -eq 0 ]; then
+        echo "probe:    $m -- COULD NOT READ -- is_error false with no modelUsage"
+        show_raw "$out" "$err"
+        exit 70
+      fi
+      keys="$(field "$(jq -r '.modelUsage | keys_unsorted | join(",")' "$out")")"
+      canonical="-"; shown="$keys"
+      if [ "$nkeys" -eq 1 ]; then
+        canonical="$(field "$(jq -r '.modelUsage | to_entries[0].value | if type == "object" and (.canonicalModel | type) == "string" then .canonicalModel else "-" end' "$out")")"
+        if [ "$canonical" != "-" ] && [ "$canonical" != "$keys" ]; then shown="$keys (canonical $canonical)"; fi
+      fi
+      echo "probe:    $m -- AVAILABLE (answered as $shown, ${secs}s)"
+      PROBE_RECORD+=("probe: $m AVAILABLE $keys $canonical $secs")
+      LAUNCH_MODEL="$m"
+      return 0
+    fi
+    # 5. neither true nor false.
+    echo "probe:    $m -- COULD NOT READ -- is_error is not a boolean"
+    show_raw "$out" "$err"
+    exit 70
+  done
+  return 0
+}
+
+# ---- 4.3 steps 1 to 3: the record, then its pointer -----------------------
+UUID=""
+fail_record() {
+  echo "scaffold-launch: $1; nothing launched" >&2
+  [ -n "$REC_TMP" ] && rm -f -- "$REC_TMP"
+  [ -n "$REC" ] && rm -f -- "$REC"
+  [ -n "${PTR_TMP:-}" ] && rm -f -- "$PTR_TMP"
+  exit 73
+}
+write_record_and_pointer() {
+  local dir text want got line a waited ptr ptr_text
+  # 1. the session id.
+  if command -v uuidgen > /dev/null && UUID="$(uuidgen)" && [ -n "$UUID" ]; then :
+  elif [ -r /proc/sys/kernel/random/uuid ] && read -r UUID < /proc/sys/kernel/random/uuid && [ -n "$UUID" ]; then :
+  else
+    echo "scaffold-launch: no uuid source (uuidgen, /proc/sys/kernel/random/uuid); nothing launched" >&2
+    exit 70
+  fi
+  UUID="${UUID,,}"
+  if ! [[ "$UUID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    echo "scaffold-launch: the uuid source gave '$UUID', not a uuid; nothing launched" >&2
+    exit 70
+  fi
+  # 2. the record: composed, hashed, written beside its final name, read back
+  # by hash, then renamed. The rename is the step's last write.
+  dir="$STATE/$REPO"
+  mkdir -p "$dir" || fail_record "could not make the record directory $dir"
+  text="repo: $(oneline "$REPO")"$'\n'
+  text+="toplevel: $(oneline "$TOP")"$'\n'
+  text+="started: $(now_stamp)"$'\n'
+  text+="claude: $CLAUDE_VERSION"$'\n'
+  text+="tree: $TREE_RECORD"$'\n'
+  text+="order: $ORDER"$'\n'
+  for line in "${PROBE_RECORD[@]}"; do text+="$line"$'\n'; done
+  text+="launched: $LAUNCH_MODEL"$'\n'
+  text+="session: $UUID"$'\n'
+  for a in "${PASS[@]}"; do text+="arg: $(oneline "$a")"$'\n'; done
+  want="$(sha_of_text "$text")"
+  REC_TMP="$dir/$UUID.record.tmp"; REC="$dir/$UUID.record"
+  printf '%s' "$text" > "$REC_TMP" || fail_record "could not write $REC_TMP"
+  chmod 644 "$REC_TMP" || fail_record "could not set the mode of $REC_TMP"
+  got="$(sha_of_file "$REC_TMP")" || fail_record "could not read back $REC_TMP"
+  [ "$got" = "$want" ] || fail_record "the record read back with sha256 $got, composed as $want"
+  mv -T -- "$REC_TMP" "$REC" || fail_record "could not rename the record into place at $REC"
+  REC_TMP=""
+  if [ -n "${SCAFFOLD_LAUNCH_HOLD:-}" ]; then
+    echo "hold:     waiting for $SCAFFOLD_LAUNCH_HOLD"
+    waited=0
+    while [ ! -e "$SCAFFOLD_LAUNCH_HOLD" ]; do
+      if [ "$waited" -ge $(( HOLD_BOUND * 10 )) ]; then
+        rm -f -- "$REC"
+        echo "scaffold-launch: SCAFFOLD_LAUNCH_HOLD hit its ${HOLD_BOUND} s bound; nothing launched" >&2
+        exit 70
+      fi
+      sleep 0.1; waited=$((waited + 1))
+    done
+  fi
+  # 3. the point of no return is the pointer's rename, so the launch-phase
+  # handler is set first. A handler, not an ignore: an ignore is inherited by
+  # every child and would take Ctrl-C away from the session; a handler is
+  # reset to the default in the child, and bash runs it after the child ends.
+  trap 'true' INT TERM HUP
+  ptr="$STATE/$REPO.latest"; PTR_TMP="$STATE/$REPO.latest.$UUID.tmp"
+  ptr_text="$UUID"$'\n'
+  want="$(sha_of_text "$ptr_text")"
+  printf '%s' "$ptr_text" > "$PTR_TMP" || fail_record "could not write $PTR_TMP"
+  chmod 644 "$PTR_TMP" || fail_record "could not set the mode of $PTR_TMP"
+  got="$(sha_of_file "$PTR_TMP")" || fail_record "could not read back $PTR_TMP"
+  [ "$got" = "$want" ] || fail_record "the pointer read back with sha256 $got, composed as $want"
+  if ! mv -T -- "$PTR_TMP" "$ptr"; then
+    # A held interrupt can end mv after rename(2) returned. The source name
+    # exists if and only if the rename did not happen.
+    if [ -e "$PTR_TMP" ]; then fail_record "could not rename the pointer into place at $ptr"; fi
+  fi
+  PTR_TMP=""
+}
+
+# ---- 4.3 step 6: the session, in the foreground, not exec -----------------
+SESSION_EXIT=0
+run_session() {
+  "$CLAUDE" --model "$LAUNCH_MODEL" --session-id "$UUID" "${PASS[@]}"
+  SESSION_EXIT=$?
+}
+
+# ---- 4.4: after the session -----------------------------------------------
+# Every append to the record comes before the print that reports it, and a
+# print that fails (a closed terminal) does not stop the appends.
+N_APPENDED=0
+append() {
+  if printf '%s\n' "$1" >> "$REC"; then N_APPENDED=$((N_APPENDED + 1))
+  else echo "scaffold-launch: could not append to $REC: $1" >&2; fi
+}
+after_session() {
+  local slug path stamp tagged tag rest len model read_failed=0 n_without=0 n_notjson=0 i
+  local -a order=() notjson=() printed=()
+  local -A count=()
+  trap '' PIPE
+  append "ended: $(now_stamp)"
+  append "exit: $SESSION_EXIT"
+  slug="${TOP//[^A-Za-z0-9]/-}"
+  path="$CONFIG_DIR/projects/$slug/$UUID.jsonl"
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    stamp="$(now_stamp)"
+    append "transcript: (no transcript at $path, read at $stamp)"
+    printed+=("ran:      no transcript at $path (read at $stamp)")
+  elif [ ! -f "$path" ]; then
+    # a directory, a pipe, a dangling link: present, and not read. A read of
+    # a pipe would wait for a writer that never comes.
+    append "transcript: $path"
+    append "ran: transcript could not be read (not a regular file)"
+    printed+=("ran:      transcript could not be read (not a regular file)")
+  else
+    append "transcript: $path"
+    # Each line is parsed alone, so one unparsable line is counted and
+    # printed and the rest are still read. The parse result is wrapped in an
+    # array, so a literal null or false line is a JSON value, not a failure.
+    # M: an assistant line with a model. W: one without. N: not JSON, or a
+    # JSON value that is not an object, with its length. O: any other object.
+    # What is carried out of jq is cut at 200 characters first and cleaned by
+    # code point, not by a regex: a long run of control characters (a
+    # zero-filled tail) must not cost more than its length.
+    tagged="$(jq -R -r '
+      def clean: explode | map(if . < 32 or . == 127 then 32 else . end) | implode;
+      . as $l
+      | first((try ($l | fromjson | [.]) catch null), null) as $p
+      | if $p == null or ($p[0] | type) != "object"
+        then "N\t" + ($l | length | tostring) + "\t" + ($l[0:200] | clean)
+        elif $p[0].type == "assistant" then
+          (if ($p[0].message | type) == "object" and ($p[0].message.model | type) == "string"
+           then $p[0].message.model else "" end) as $raw
+          | ($raw[0:200] | clean) as $m
+          | if ($m | test("^ *$")) then "W\t"
+            elif ($raw | length) > 200 then "M\t" + $m + " [cut at 200 characters]"
+            elif $m != $raw then "M\t" + $m + " [control characters replaced]"
+            else "M\t" + $m end
+        else "O\t" end' "$path" 2> "$SCRATCH/transcript.err")" || read_failed=$?
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tag="${line%%$'\t'*}"; rest="${line#*$'\t'}"
+      case "$tag" in
+        M) if [ -z "${count[$rest]+x}" ]; then order+=("$rest"); count[$rest]=0; fi
+           count[$rest]=$(( ${count[$rest]} + 1 )) ;;
+        W) n_without=$((n_without + 1)) ;;
+        N) n_notjson=$((n_notjson + 1))
+           len="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+           [ "$len" -le 200 ] || rest="$rest [cut at 200 characters of $len]"
+           notjson+=("$rest") ;;
+      esac
+    done <<< "$tagged"
+    for model in "${order[@]}"; do
+      append "ran: $model ${count[$model]}"
+      printed+=("ran:      $model x ${count[$model]}")
+    done
+    if [ "$n_without" -gt 0 ]; then
+      append "ran: $n_without without model"
+      printed+=("ran:      $n_without assistant lines without a model field")
+    fi
+    if [ "$n_notjson" -gt 0 ]; then
+      append "ran: $n_notjson not json"
+      printed+=("ran:      $n_notjson lines that did not parse as JSON")
+      for i in "${notjson[@]}"; do printed+=("      $i"); done
+    fi
+    if [ "$read_failed" -eq 0 ] && [ "${#order[@]}" -eq 0 ] && [ "$n_without" -eq 0 ]; then
+      # a transcript that was read and holds no assistant line says so
+      append "ran: 0 assistant lines"
+      printed+=("ran:      0 assistant lines in the transcript")
+    fi
+    if [ "$read_failed" -ne 0 ]; then
+      # what could not be read is named apart, never passed as "no turns"
+      append "ran: transcript could not be read (jq exit $read_failed)"
+      printed+=("ran:      transcript could not be read (jq exit $read_failed): $(oneline "$(cat "$SCRATCH/transcript.err")")")
+    fi
+  fi
+  echo "session:  exit $SESSION_EXIT"
+  for i in "${printed[@]}"; do printf '%s\n' "$i"; done
+  echo "record:   $REC ($N_APPENDED lines appended)"
+}
+
+# ---- the run --------------------------------------------------------------
+check_tree  # 4.1 step 7, before any probe
+echo "order:    ${ORDER//,/, }"
+probe_models
+if [ -z "$LAUNCH_MODEL" ]; then
+  echo "launch:   none -- no model in the order is available; the work waits (OPERATOR-PROFILE.md)"
+  exit 75
+fi
+if $PROBE_ONLY; then
+  echo "launch:   (probe only; $LAUNCH_MODEL is available)"
+  exit 0
+fi
+write_record_and_pointer  # 4.3 steps 1 to 3, before the launch
+echo "launch:   $LAUNCH_MODEL, session $UUID"
+echo "record:   $REC"
+run_session
+after_session
+exit "$SESSION_EXIT"

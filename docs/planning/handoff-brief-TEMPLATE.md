@@ -44,16 +44,20 @@ Closed this session: <numbers>, or none.
 
 ## Opening the next chat -- [project] session [NNN+1] <!-- required -->
 
-**Route A -- Claude Code.** In your terminal, `cd ~/[project] && git status -sb`
-prints one line, `## main...origin/main`; anything more is committed first.
-Then:
+**Route A -- Claude Code.** In your terminal:
 
-    cd ~/[project] && claude --model [model]
+    cd ~/[project] && bin/scaffold-launch
 
-The screen shows the banner and an empty prompt; the opening hook's output
-goes into the session, not onto the screen. Type `start`. The gate refuses
-with a reason while the opening is blocked: fix the cause in your terminal,
-`/exit`, and start again. End with `/exit` after the closeout's last commit.
+It refuses a tree with uncommitted changes (commit first), probes the
+project's model order (printed as `order:`), one short turn each, and
+opens the session on the first that answers; with none it exits 75 and
+the work waits. The screen shows the probes, the model opened, the
+record's path, then the banner and an empty prompt; the opening hook's
+output goes into the session, not onto the screen. Type `start`. The
+gate refuses with a reason while the opening is blocked: fix the cause
+in your terminal, `/exit`, and start again. End with `/exit` after the
+closeout's last commit; the launcher then prints the models that
+answered, from the transcript.
 
 **Route B -- a claude.ai chat.**
 

@@ -51,6 +51,7 @@ WORKING-AGREEMENT.md       -- this project's log of corrections
 CHANGELOG.md / VERSION     -- what changed upstream, and which version you're on
 bin/scaffold-update        -- pull newer method files from upstream
 bin/scaffold-file-letter   -- file an inbound letter from a sibling repo's HEAD, checked by hash
+bin/scaffold-launch        -- open a Claude Code session on the first available model of the order, and record it
 docs/
   planning/
     master-plan.md         -- what's being built and why

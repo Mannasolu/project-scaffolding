@@ -6,6 +6,72 @@ Versions are stamped in `VERSION`. Downstream projects check with
 Each entry names the rule **and the cost that produced it**. A rule without its
 cost gets deleted later by someone who doesn't know why it's there.
 
+## 1.16.1
+
+**Upgrade note: 1.16.0 was never published, so this is the first release a
+project receives with the launcher, and 1.16.0's upgrade note below is this
+release's.** No document changed after 1.16.0.
+
+- `bin/scaffold-launch`, the fixes of the second and third cold reads, made
+  after the 1.16.0 bump:
+  - after `--`, a long option that abbreviates a refused one is refused with
+    it, and `--environment` and `--tmux` are refused; a number (`-5`) is not a
+    cluster of short options; a refused word that is really another option's
+    value is given as `--option=value`;
+  - `SCAFFOLD_CLAUDE` set and empty is an error (exit 127), never the default;
+  - `timeout` is checked with `jq` and `setsid` (exit 69);
+  - a relative `CLAUDE_CONFIG_DIR` is exported in its absolute form, so the
+    session writes its transcript where the launcher reads it;
+  - a transcript path that is not a regular file is recorded as not read, and
+    never opened;
+  - control characters are replaced by byte and by code point, whatever the
+    locale, and a model name or an unparsable line is cut at 200 characters
+    before it is cleaned, and says so.
+  *Cost: the 1.16.0 bump was committed as "the last synced change" before the
+  cold reads of the launcher's fixes had stopped, and three more rounds changed
+  the script after it. The push to `main` was refused by the version check; no
+  check had run on the release branch, where the change was made.*
+
+## 1.16.0
+
+**Upgrade note: each project rewrites its brief's route A from
+`docs/planning/handoff-brief-TEMPLATE.md` at its next closeout.** Route A is
+now `cd ~/<project> && bin/scaffold-launch`. Until a brief is rewritten its old
+block still opens a session, on one model, with the fallback run by hand.
+`bin/scaffold-launch` needs `jq`, and `setsid` and `uuidgen` from util-linux
+(`uuidgen` falls back to `/proc/sys/kernel/random/uuid`). PROJECT-INSTRUCTIONS.md
+changed, so a claude.ai Project's Instructions field is re-pasted; a Claude Code
+session reads the files live and needs no paste.
+
+- `bin/scaffold-launch`, new and synced: opens a Claude Code session on the
+  first available model of the project's order. It refuses a tree with
+  uncommitted changes, probes each model with one bounded print-mode turn and
+  classifies the answer from its machine fields, writes a record and its
+  pointer before the session starts, and appends the models that answered,
+  read from the transcript, after it ends. With no model available it exits 75
+  and the work waits. It refuses to run inside a session.
+  *Cost: the fallback's own flag does not fire on a spent allowance, so three
+  sessions tried the first model, read the refusal by eye and restarted on the
+  second; the model that ran was then recorded from a banner or from recall,
+  and settling which model one session had run cost a session's worth of
+  reads. A route that names one model is wrong whenever that model is out.*
+- `docs/planning/handoff-brief-TEMPLATE.md`: route A runs the launcher and
+  names no model; the `[model]` placeholder is gone. `bin/scaffold-init` no
+  longer substitutes it and prints the launcher's command as the first
+  session's opening.
+  *Cost: a release id written into every brief was wrong from the day the next
+  release shipped, and nothing said so.*
+- `PROJECT-INSTRUCTIONS.md`, "Claude Code sessions": the session is opened by
+  the launcher, and the session log quotes its record, never recall. "How to
+  respond": a bound carries a signal the bounded command cannot ignore, a
+  command that does not need the terminal is taken off it, and a bound is
+  proven by a run that hits it.
+  *Cost: a bounded command that ignored the bound's first signal ran on past
+  it, and a command still attached to the terminal took its interrupt from the
+  keyboard instead of from its bound.*
+- `docs/specs/component-spec-TEMPLATE.md`: the Executor model line names the
+  order the builder's session opens on, not one model.
+
 ## 1.15.1
 
 No upgrade note: no document changed, so no Instructions field needs a re-paste.
